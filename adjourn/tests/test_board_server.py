@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import tempfile
+import time as _time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -412,6 +413,604 @@ broken.write_text(
 resilient = client.get("/")
 check("board survives a half-written line", resilient.status_code == 200)
 check("the good record still renders", "fine" in resilient.get_data(as_text=True))
+
+
+# =============================================================================
+print("\n== the rail: the live region, and where its rows come from ==")
+
+# The rail is the pipeline panel moved into the right-hand column so it can be
+# permanently open and animate through a run. Two sources feed its live region:
+# the orchestrator's own `feed` (per statement, per decision, per fire — the
+# contract is scratchpad/pipeline-feed-spec.md), and, when that is absent, a
+# coarser feed the board DERIVES from the counters and the journal so the rail
+# moves whether or not the orchestrator has implemented the spec yet.
+
+rail_directory = Path(tempfile.mkdtemp(prefix="adjourn-board-rail-"))
+rail_pipeline = rail_directory / "pipeline.json"
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(rail_directory / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(rail_directory / "pending.json")
+os.environ["ADJOURN_BOARD_PIPELINE"] = str(rail_pipeline)
+
+# --- derived, from nothing but counters ---
+rail_pipeline.write_text(json.dumps({
+    "mode": "replay",
+    "watcher": {"phase": "transcript_ready", "detail": "final transcript on disk"},
+    "extraction": {"phase": "done", "statement_count": 4, "segment_count": 28,
+                   "silent_count": 24, "kinds": {"decision": 2, "commitment": 2}},
+    "planner": {"phase": "done", "action_count": 3, "ignored_count": 2,
+                "action_kinds": {"github_update": 2, "slack_send": 1},
+                "ignored_kinds": {"chatter": 2}},
+}), encoding="utf-8")
+
+derived = client.get("/api/pipeline").get_json()
+check("with no feed written the board derives one", derived["feed_source"] == "derived")
+check("the derived feed is not empty", len(derived["feed"]) >= 5, str(len(derived["feed"])))
+derived_texts = " | ".join(row["text"] for row in derived["feed"])
+check("the derived feed shows what the planner DECLINED",
+      "chatter → ignored" in derived_texts, derived_texts)
+check("the derived feed shows what it routed",
+      "routed → github_update" in derived_texts, derived_texts)
+check("the derived feed shows the silent lines",
+      "24 lines produced nothing" in derived_texts, derived_texts)
+check("every derived row is marked derived",
+      all(row["derived"] for row in derived["feed"]))
+check("derived rows are ordered watcher → extraction → planner",
+      [row["stage"] for row in derived["feed"]][:2] == ["watcher", "extraction"],
+      str([row["stage"] for row in derived["feed"]]))
+
+# --- the orchestrator's own feed wins ---
+rail_pipeline.write_text(json.dumps({
+    "mode": "replay",
+    "watcher": {"phase": "transcript_ready", "detail": "final transcript on disk"},
+    "extraction": {"phase": "running", "statement_count": 2, "segment_count": 28,
+                   "batch_index": 3, "batch_total": 4, "kinds": {"decision": 2}},
+    "planner": {"phase": "idle"},
+    "feed": [
+        {"seq": 1, "stage": "watcher", "tone": "note", "label": "transcript ready",
+         "at": "2026-08-21T02:00:00Z", "text": "28 lines on disk"},
+        {"seq": 2, "stage": "extraction", "tone": "act", "label": "decision",
+         "at": "2026-08-21T02:00:01Z",
+         "text": "the join button green is wrong — use the muted slate"},
+        {"seq": 3, "stage": "planner", "tone": "decline", "label": "hypothetical",
+         "at": "2026-08-21T02:00:02Z", "text": "declined: negated"},
+        "not a dict at all",
+        {"seq": "junk", "stage": "planner", "tone": "ignore", "label": "chatter",
+         "text": "chatter → ignored"},
+        {"seq": 9, "stage": "extraction", "tone": "act", "label": "x" * 90,
+         "text": "y" * 400},
+    ],
+}), encoding="utf-8")
+
+streamed = client.get("/api/pipeline").get_json()
+check("a written feed beats the derived one", streamed["feed_source"] == "orchestrator")
+check("junk rows are dropped, not fatal", len(streamed["feed"]) == 5,
+      str(len(streamed["feed"])))
+check("a statement's own words reach the rail",
+      any("muted slate" in row["text"] for row in streamed["feed"]))
+check("a refusal reaches the rail with its reason",
+      any(row["tone"] == "decline" and "negated" in row["text"] for row in streamed["feed"]))
+check("a row with a junk seq still renders, numbered by position",
+      any(row["label"] == "chatter" for row in streamed["feed"]))
+check("an over-long row is clipped, not truncated mid-word",
+      all(len(row["text"]) <= board_server.FEED_TEXT_LIMIT for row in streamed["feed"]))
+check("an over-long chip is clipped to the chip budget",
+      all(len(row["label"]) <= 24 for row in streamed["feed"]))
+check("feed_seq is the high-water mark", streamed["feed_seq"] == 9,
+      str(streamed["feed_seq"]))
+check("batch progress is reported as a line and a fraction",
+      streamed["extraction"]["batch_line"] == "batch 3/4"
+      and streamed["extraction"]["batch_fraction"] == 0.75,
+      str(streamed["extraction"]))
+
+rail_markup = client.get("/").get_data(as_text=True)
+check("the rail is beside the cards, not above them",
+      'class="board-rail"' in rail_markup
+      and rail_markup.index('class="board-cards"') < rail_markup.index('class="board-rail"'))
+check("the rail renders its rows", rail_markup.count('class="rail-row"') == 5,
+      str(rail_markup.count('class="rail-row"')))
+check("each row carries the seq the animation keys on",
+      'data-seq="9"' in rail_markup)
+check("the batch bar renders only when there is a batch total",
+      'class="rail-batch"' in rail_markup and "batch 3/4" in rail_markup)
+check("the rail still names all four stages",
+      all(f'data-stage="{stage}"' in rail_markup
+          for stage in ("watcher", "extraction", "planner", "executors")))
+check("board.js animates only rows it has not seen",
+      b"is-new" in client.get("/static/board.js").data)
+
+# THE 1s POLL HAS TO NOTICE A NEW EVENT. If the version hash ignored the feed the
+# rail would freeze mid-run while the counters stayed the same.
+before_version = board_server.compute_version(board_server.load_board_state())
+document = json.loads(rail_pipeline.read_text(encoding="utf-8"))
+document["feed"].append({"seq": 10, "stage": "executor", "tone": "act",
+                         "label": "slack_send", "text": "Posted to #all-test · live"})
+rail_pipeline.write_text(json.dumps(document), encoding="utf-8")
+after_version = board_server.compute_version(board_server.load_board_state())
+check("a new feed event changes the fragment version", before_version != after_version)
+
+# A HALF-WRITTEN FILE IS READ ONCE A SECOND. It must be an idle rail, not a 500.
+rail_pipeline.write_text('{"feed": [{"seq": 1, "stage": "extra', encoding="utf-8")
+check("a half-written pipeline.json is idle, not an error page",
+      client.get("/").status_code == 200)
+check("...and the rail falls back to derived",
+      client.get("/api/pipeline").get_json()["feed_source"] == "derived")
+rail_pipeline.unlink()
+check("a missing pipeline.json is still 200", client.get("/").status_code == 200)
+
+
+# =============================================================================
+print("\n== never-blank open: an idle board shows the last meeting's receipts ==")
+
+# Demo-night state is a DELETED journal — reset_demo archives it as
+# executions.<ts>.jsonl. The board used to open on one italic sentence and a
+# pulse, which contradicts the pitch in the very first frame.
+
+blank_directory = Path(tempfile.mkdtemp(prefix="adjourn-board-blank-"))
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(blank_directory / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(blank_directory / "pending.json")
+os.environ["ADJOURN_BOARD_PIPELINE"] = str(blank_directory / "pipeline.json")
+
+archive = blank_directory / "executions.20260814T090000Z.jsonl"
+archive.write_text("\n".join(json.dumps(row) for row in [
+    {"record_type": "execution", "kind": "github_update", "ok": True, "mode": "live",
+     "human_summary": "Commented on issue #2 — the cache decision changed",
+     "dedup_key": "prior:issue-2:decision", "meeting_id": "prior-standup",
+     "fired_at": "2026-08-14T09:00:00+00:00", "speaker": "Sam"},
+    {"record_type": "execution", "kind": "slack_send", "ok": True, "mode": "sim",
+     "human_summary": "Posted the standup summary to #all-test",
+     "dedup_key": "prior:slack", "meeting_id": "prior-standup",
+     "fired_at": "2026-08-14T09:00:20+00:00", "speaker": "Sharique"},
+]) + "\n", encoding="utf-8")
+
+blank_state = board_server.load_board_state()
+check("an empty journal still finds the archived one",
+      blank_state["last_adjourned"] is not None)
+check("the receipts come from the archive, and it says so in a sentence",
+      blank_state["last_adjourned"]["source"] == "journal"
+      and "machine" in blank_state["last_adjourned"]["source_note"])
+# This note is printed twice on the opening frame — in the masthead beside the
+# totals and under the receipts themselves. A timestamped filename in either
+# place is a line nobody in the room can use and one more thing to read.
+check("and it names no file while doing it",
+      ".jsonl" not in blank_state["last_adjourned"]["source_note"],
+      blank_state["last_adjourned"]["source_note"])
+check("the receipts are the last meeting's actions",
+      any("cache decision changed" in row["summary"]
+          for row in blank_state["last_adjourned"]["rows"]))
+check("nothing is fabricated — the count is the archive's own",
+      blank_state["last_adjourned"]["count"] == 2)
+
+blank_markup = client.get("/").get_data(as_text=True)
+check("the idle board renders a Last adjourned header",
+      "Last adjourned" in blank_markup and 'class="lastadj"' in blank_markup)
+check("the waiting pulse is still there under it",
+      "empty-pulse" in blank_markup and board_server.EMPTY_STATE_LINE in blank_markup)
+check("the pulse is quieted when there are receipts above it",
+      "empty-state is-quiet" in blank_markup)
+check("the fragment carries it too, so a poll cannot blank the page",
+      "Last adjourned" in client.get("/api/fragment").get_json()["cards_html"])
+
+# THE HEADER IS HALF THE COLD OPEN. Receipts below and "0 actions · 0 live · 0 sim"
+# above is a screen that argues with itself in the first frame — the panel says
+# this machine did six things last meeting, the masthead says nothing has ever
+# happened. The count is still never invented: it is the panel's own.
+check("a cold open's totals do not read as just '0 actions'",
+      "0 actions" not in blank_state["totals_line"], blank_state["totals_line"])
+check("...they point at the receipts underneath, with the panel's own number",
+      "2 receipts" in blank_state["totals_line"]
+      and "Nothing yet" in blank_state["totals_line"],
+      blank_state["totals_line"])
+# The mode note used to be a COPY of the receipts panel's source line, printed
+# eighty pixels above it — the same sentence twice in the opening frame. It is
+# the mode note, so it reports the mode: nothing has been sent or simulated yet.
+check("...and the mode note reports the mode rather than repeating the panel",
+      blank_state["mode_note"]
+      and blank_state["mode_note"] != blank_state["last_adjourned"]["source_note"]
+      and "transport" in blank_state["mode_note"],
+      f"{blank_state['mode_note']!r}")
+check("the served masthead carries that line, not a dead zero",
+      blank_state["totals_line"] in blank_markup and "0 actions" not in blank_markup)
+check("a board WITH actions still gets the plain running count",
+      "actions" in state["totals_line"] and "live" in state["totals_line"],
+      state["totals_line"])
+
+# A board WITH cards must not pay for the memory read or show a second history.
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(_SANDBOX / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(_SANDBOX / "pending.json")
+check("a board with cards does not compute last-adjourned",
+      board_server.load_board_state()["last_adjourned"] is None)
+check("...and does not render the header",
+      "Last adjourned" not in client.get("/").get_data(as_text=True))
+
+# An archive that is empty, unreadable, or absent must not be an error page.
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(blank_directory / "executions.jsonl")
+archive.write_text("{ not json\n", encoding="utf-8")
+check("an unreadable archive degrades quietly", client.get("/").status_code == 200)
+archive.unlink()
+
+
+# =============================================================================
+print("\n== never-blank open, second source: memory, after a full reseed ==")
+
+# THE REGRESSION THIS PINS. `reset_demo --reseed` is the demo-night command, and
+# a reseed that also cleared the rotated journals would leave the archive branch
+# with nothing to read. If the memory branch were ever to regress with it, the
+# cold open would silently fall back to the exact dead frame the brief names:
+# "0 actions · Adjourned. Waiting for the next meeting." So this drives the
+# memory branch DIRECTLY, with no archive on disk at all.
+
+
+class _FakePrior:
+    """One row of what memory remembers. Same attributes memory_store yields."""
+
+    def __init__(self, claim, speaker, kind, segment_id):
+        self.segment_id = segment_id
+        self.speaker = speaker
+        self.topic = "cache"
+        self.claim = claim
+        self.kind = kind
+        self.meeting_id = "prior-standup"
+        self.meeting_date = "2026-08-14"
+
+
+class _FakeMemory:
+    backend = "falkor"
+    closed = False
+
+    def known_topics(self, limit=40):
+        return ["cache", "webhooks"]
+
+    def find_prior_commitments(self, topic, limit=10):
+        if topic != "cache":
+            return []
+        return [
+            _FakePrior("We are going with Redis for the session cache", "Sam",
+                       "decision", "seg-1"),
+            _FakePrior("Priya will own the webhook signature ticket", "Priya",
+                       "commitment", "seg-2"),
+        ]
+
+    def close(self):
+        _FakeMemory.closed = True
+
+
+from adjourn import memory_store as _memory_store  # noqa: E402
+
+# A reseeded box has NOTHING in flight either — the pending file the fixture left
+# behind would otherwise keep the never-blank branch from ever being reached.
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(blank_directory / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(blank_directory / "pending.json")
+
+_real_open_memory = _memory_store.open_memory
+_memory_store.open_memory = lambda *args, **kwargs: _FakeMemory()
+try:
+    check("no archive is left on disk for this branch to cheat with",
+          board_server.archived_journal_paths() == [])
+    reseeded = board_server.load_board_state()
+    check("with no journal and no archive the board still reads memory",
+          reseeded["last_adjourned"] is not None)
+    check("and it says memory is where the rows came from",
+          reseeded["last_adjourned"]["source"] == "memory"
+          and "remembers" in reseeded["last_adjourned"]["source_note"])
+    check("the rows are what memory actually holds, not a placeholder",
+          any("Redis" in row["summary"] for row in reseeded["last_adjourned"]["rows"]))
+    check("the memory handle is closed after the read", _FakeMemory.closed)
+    reseeded_markup = client.get("/").get_data(as_text=True)
+    check("the reseeded cold open renders receipts, not the dead pulse alone",
+          "Last adjourned" in reseeded_markup and "Redis" in reseeded_markup)
+    check("...and its totals are not '0 actions' either",
+          "0 actions" not in reseeded_markup, reseeded["totals_line"])
+finally:
+    _memory_store.open_memory = _real_open_memory
+
+# A memory backend that will not open is a quiet miss, never a 500 — a demo box
+# with the container down must still serve the board.
+_memory_store.open_memory = lambda *args, **kwargs: (_ for _ in ()).throw(
+    RuntimeError("falkor is not listening")
+)
+try:
+    check("an unreachable memory backend degrades to the pulse, not an error page",
+          client.get("/").status_code == 200)
+    check("...and last_adjourned is simply absent",
+          board_server.load_board_state()["last_adjourned"] is None)
+finally:
+    _memory_store.open_memory = _real_open_memory
+
+
+# =============================================================================
+print("\n== the rail advances: pipeline.json is the contract, batch by batch ==")
+
+# B2's half of the feed contract. The board's reader is complete; what this pins
+# is that the reader is pointed at the file the ORCHESTRATOR writes, and that a
+# batch counter climbing inside one extraction pass actually moves the bar and
+# re-renders the 1s fragment. A bar that only moves when the stage changes is the
+# freeze the brief calls out ("the rail must move, not freeze idle").
+
+os.environ.pop("ADJOURN_BOARD_PIPELINE", None)
+check("with no override the board reads exactly the orchestrator's own path",
+      board_server.pipeline_path() == board_server.config.pipeline_status_path(),
+      f"{board_server.pipeline_path()} vs {board_server.config.pipeline_status_path()}")
+
+advance_directory = Path(tempfile.mkdtemp(prefix="adjourn-board-advance-"))
+advance_pipeline = advance_directory / "pipeline.json"
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(advance_directory / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(advance_directory / "pending.json")
+os.environ["ADJOURN_BOARD_PIPELINE"] = str(advance_pipeline)
+
+
+def _write_batch(index: int, total: int, rows: list[dict]) -> None:
+    """One orchestrator write, exactly the shape the feed spec describes."""
+    advance_pipeline.write_text(json.dumps({
+        "updated_at": "2026-08-21T02:14:07Z",
+        "mode": "replay",
+        "pass_name": "replay",
+        "meeting_id": "agi-living-room",
+        "watcher": {"phase": "transcript_ready", "detail": "final transcript on disk"},
+        "extraction": {"phase": "running", "statement_count": len(rows),
+                       "segment_count": 28, "silent_count": 0,
+                       "batch_index": index, "batch_total": total,
+                       "kinds": {}, "source": "claude", "detail": "running"},
+        "planner": {"phase": "idle"},
+        "feed": rows,
+    }), encoding="utf-8")
+
+
+_rows: list[dict] = []
+_seen_widths: list[float] = []
+_seen_versions: list[str] = []
+for _batch in range(1, 5):
+    _rows.append({"seq": len(_rows) + 1, "at": "2026-08-21T02:14:07Z",
+                  "stage": "extraction", "tone": "note", "label": "batch",
+                  "text": f"batch {_batch}/4 · 7 lines"})
+    _write_batch(_batch, 4, list(_rows))
+    _api = client.get("/api/pipeline").get_json()
+    _seen_widths.append(_api["extraction"]["batch_fraction"])
+    _seen_versions.append(board_server.compute_version(board_server.load_board_state()))
+    check(f"batch {_batch}/4 is reported verbatim",
+          _api["extraction"]["batch_line"] == f"batch {_batch}/4"
+          and _api["extraction"]["batch_index"] == _batch,
+          str(_api["extraction"]))
+
+check("the bar fraction climbs monotonically across the pass",
+      _seen_widths == sorted(_seen_widths) and _seen_widths[0] < _seen_widths[-1]
+      and _seen_widths[-1] == 1.0, str(_seen_widths))
+check("every batch boundary changes the fragment version, so the 1s poll sees it",
+      len(set(_seen_versions)) == 4, str(len(set(_seen_versions))))
+check("a hand-written pipeline.json flips the rail off the derived fallback",
+      client.get("/api/pipeline").get_json()["feed_source"] == "orchestrator")
+
+_advance_markup = client.get("/").get_data(as_text=True)
+check("the rendered bar width matches the reported fraction",
+      "width: 100.0%" in _advance_markup, "the bar must be server-rendered, not JS-only")
+check("the rail names the batch on screen, not only in the API",
+      "batch 4/4" in _advance_markup)
+check("the always-on rail is still the one the contract names",
+      "data-guts-rail" in _advance_markup and '<details class="guts"' not in _advance_markup)
+
+# The bar is a claim about work in flight. With no batching reported it must not
+# render at all — a progress bar with nothing behind it is a progress bar that lies.
+_write_batch(0, 0, list(_rows))
+check("no batch total means no bar",
+      'class="rail-batch"' not in client.get("/").get_data(as_text=True))
+check("...but the streamed rows still win over the derived ones",
+      client.get("/api/pipeline").get_json()["feed_source"] == "orchestrator")
+
+
+# =============================================================================
+print("\n== a card's quote traces back to the transcript ==")
+
+os.environ["ADJOURN_BOARD_JOURNAL"] = str(_SANDBOX / "executions.jsonl")
+os.environ["ADJOURN_BOARD_PENDING"] = str(_SANDBOX / "pending.json")
+
+_FIXTURE_MEETING = "20260821-093000"
+
+# Whether THIS machine happens to hold a recording called 20260821-093000 is not
+# what is under test, so the library answer is pinned rather than read off the
+# operator's disk. Both answers are exercised below.
+board_server._TRANSCRIPT_PRESENT[_FIXTURE_MEETING] = True
+board_server._TRANSCRIPT_MISSES.pop(_FIXTURE_MEETING, None)
+
+trace_state = board_server.load_board_state()
+_quoted = [card for card in trace_state["cards"] if card["quote"]]
+check("the fixture has cards that carry a quote", len(_quoted) > 0)
+check("every quoted card knows where its words came from",
+      all(card["transcript_url"] == f"/meetings/{card['meeting_id']}"
+          for card in _quoted if card["meeting_id"]),
+      str([card["transcript_url"] for card in _quoted]))
+check("a pending countdown traces back too",
+      all(item["transcript_url"] == f"/meetings/{item['meeting_id']}"
+          for item in trace_state["pending"] if item["meeting_id"]))
+
+trace_markup = client.get("/").get_data(as_text=True)
+check("the quote is rendered as the link, not a separate footnote",
+      f'class="quote-text quote-trace" href="/meetings/{_FIXTURE_MEETING}"' in trace_markup)
+check("the fragment renders the same trace, so a poll cannot drop it",
+      "quote-trace" in client.get("/api/fragment").get_json()["cards_html"])
+check("board.css styles the trace so it does not read as a raw blue link",
+      b".quote-trace" in client.get("/static/board.css").data)
+
+# A MEETING WITH NOTHING BEHIND IT GETS NO LINK. This was written for the fixture
+# replay, which used to have no page at all; fixture_library has since given the
+# demo tape a real transcript view (checked below), so the case this now pins is
+# the general one — any id neither the engine, the recordings folder nor the
+# fixtures hold. A quote that links to a 404 is a dead door; it stays plain text.
+board_server._TRANSCRIPT_PRESENT.pop(_FIXTURE_MEETING, None)
+board_server._TRANSCRIPT_MISSES[_FIXTURE_MEETING] = _time.monotonic()
+check("a meeting the library does not hold gets no link at all",
+      board_server.card_transcript_url(_FIXTURE_MEETING) == "")
+no_trace_markup = client.get("/").get_data(as_text=True)
+check("...and the quote falls back to plain text, not a 404 link",
+      "quote-trace" not in no_trace_markup and "quote-text" in no_trace_markup)
+check("the words themselves are still on the card",
+      "&ldquo;" in no_trace_markup)
+
+# A recording that lands mid-demo must start linking without a restart: a miss is
+# remembered only briefly, a hit is remembered for good.
+board_server._TRANSCRIPT_MISSES[_FIXTURE_MEETING] = (
+    _time.monotonic() - board_server.TRANSCRIPT_MISS_TTL_SECONDS - 1
+)
+_probed: list[str] = []
+_real_read_document = board_server._read_meeting_document
+board_server._read_meeting_document = lambda mid: (_probed.append(mid), {"id": mid})[1]
+try:
+    check("an expired miss is re-probed, so a new recording starts linking",
+          board_server.card_transcript_url(_FIXTURE_MEETING)
+          == f"/meetings/{_FIXTURE_MEETING}" and _probed == [_FIXTURE_MEETING])
+    check("...and the hit is cached, so the 1s poll does not re-stat the disk",
+          board_server.card_transcript_url(_FIXTURE_MEETING)
+          and len(_probed) == 1, str(_probed))
+finally:
+    board_server._read_meeting_document = _real_read_document
+
+# A library that throws is "no link", never an error page.
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+board_server._read_meeting_document = lambda mid: (_ for _ in ()).throw(OSError("gone"))
+try:
+    check("an unreadable library degrades to no link, not a 500",
+          board_server.card_transcript_url("whatever") == "")
+    check("...and the board still renders", client.get("/").status_code == 200)
+finally:
+    board_server._read_meeting_document = _real_read_document
+
+# THE EMPTY-DOCUMENT TRAP. The engine reader answers `{}` — a dict, not None —
+# for an id it does not hold, so an `is not None` test calls every unknown
+# meeting a transcript. That is precisely how the fixture tape got a link to a
+# 404, and it was invisible until the page was opened in a browser.
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+board_server._read_meeting_document = lambda mid: {}
+try:
+    check("an empty document is not a transcript",
+          board_server.card_transcript_url(_FIXTURE_MEETING) == "")
+finally:
+    board_server._read_meeting_document = _real_read_document
+    board_server._TRANSCRIPT_PRESENT.clear()
+    board_server._TRANSCRIPT_MISSES.clear()
+
+check("no meeting id means no link", board_server.card_transcript_url("") == "")
+
+# THE DEMO TAPE ITSELF. `--replay` with no target runs agi-living-room, and beat
+# E — "from a card, the quote traces back to the transcript" — has to happen on
+# that tape and not only on a live recording. No recording exists for it, but the
+# TRANSCRIPT does: it is the .jsonl extraction reads. fixture_library hands that
+# to the same reader every other consumer uses, so the link is minted the same
+# way a real recording's is, and the title stops falling back to the raw slug.
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+check("the demo's own replay tape has somewhere for a quote to go",
+      board_server.card_transcript_url("agi-living-room") == "/meetings/agi-living-room")
+check("...and the board can name it, rather than printing its internal slug",
+      board_server.read_meeting_header("prior-standup")["title"] == "Adjourn standup — 14 Aug",
+      board_server.read_meeting_header("prior-standup")["title"])
+check("an id that is neither a recording nor a tape still gets no link",
+      board_server.card_transcript_url("not-a-tape") == "")
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+
+# THE CROSSLINK AT THE TOP OF /meeting/<id> IS THE SAME PROMISE. It is the page a
+# judge lands on from the Meetings detail's Follow-through button, and it offered
+# "Transcript" unconditionally — a 404 for every meeting the library does not
+# hold, the fixture tape included.
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+board_server._read_meeting_document = lambda mid: {}
+try:
+    _view = board_server.load_meeting_view(_FIXTURE_MEETING)
+    check("a meeting with no recording offers no Transcript crosslink",
+          _view["transcript_url"] == "", _view["transcript_url"])
+    _meeting_markup = client.get(f"/meeting/{_FIXTURE_MEETING}").get_data(as_text=True)
+    check("...and the page renders without it",
+          ">Transcript<" not in _meeting_markup
+          and "All meetings' actions" in _meeting_markup,
+          "the crosslink bar must still be there, minus the dead door")
+finally:
+    board_server._read_meeting_document = _real_read_document
+    board_server._TRANSCRIPT_PRESENT.clear()
+    board_server._TRANSCRIPT_MISSES.clear()
+
+board_server._TRANSCRIPT_PRESENT[_FIXTURE_MEETING] = True
+check("a meeting the library DOES hold keeps its Transcript crosslink",
+      board_server.load_meeting_view(_FIXTURE_MEETING)["transcript_url"]
+      == f"/meetings/{_FIXTURE_MEETING}")
+check("...and it is the same url the card quotes point at",
+      board_server.load_meeting_view(_FIXTURE_MEETING)["transcript_url"]
+      == board_server.card_transcript_url(_FIXTURE_MEETING))
+board_server._TRANSCRIPT_PRESENT.clear()
+
+_was_mounted = board_server.MEETINGS_TAB_MOUNTED
+board_server.MEETINGS_TAB_MOUNTED = False
+board_server._TRANSCRIPT_PRESENT[_FIXTURE_MEETING] = True
+check("an unmounted Meetings tab means no link either",
+      board_server.card_transcript_url(_FIXTURE_MEETING) == "")
+board_server.MEETINGS_TAB_MOUNTED = _was_mounted
+board_server._TRANSCRIPT_PRESENT.clear()
+
+
+# =============================================================================
+print("\n== the board never names the recorder as a second product ==")
+
+# The engine is an implementation detail. A judge sits on :5117 for the whole
+# demo and is never told there is another app to go find, so no page this lane
+# serves may print its name — including in a comment, which View Source shows.
+#
+# ONE EXEMPTION, AND IT IS DELIBERATE. The journal really does live in a
+# `~/.meetingscribe/` directory on this machine, and Connections is the page
+# whose entire job is to say truthfully where bytes are read and written. A
+# filesystem path is DATA, not copy; renaming it on screen would make the
+# honest-preflight tab dishonest about the one thing it exists to disclose. So
+# the rule this pins is sharper than "the string is absent": every surviving
+# occurrence must sit inside a `.meetingscribe/` path, never in a sentence.
+
+_PATH_EXEMPTION = ".meetingscribe/"
+
+for _path in ("/", "/ledger", "/connections", "/static/board.css", "/static/board.js"):
+    _served = client.get(_path).get_data(as_text=True).lower()
+    _stripped = _served.replace(_PATH_EXEMPTION, "«journal-dir»/")
+    check(f"{_path} never names the engine in copy",
+          "meetingscribe" not in _stripped,
+          f"{_stripped.count('meetingscribe')} hits outside a filesystem path")
+
+# The sandbox journal lives in a temp dir, so the page above proves nothing about
+# the real path. Assert the template itself is clean — that is the copy.
+_connections_source = (
+    board_server.config.PACKAGE_ROOT / "templates" / "connections.html"
+).read_text(encoding="utf-8").lower()
+check("connections.html carries no product name at all, in copy or comment",
+      "meetingscribe" not in _connections_source,
+      f"{_connections_source.count('meetingscribe')} hits")
+check("the engine card still says what it is and where",
+      "loopback" in client.get("/connections").get_data(as_text=True))
+check("paths are shown home-relative, not with the operator's account name",
+      board_server.display_path(Path.home() / ".meetingscribe" / "executions.jsonl")
+      == "~/.meetingscribe/executions.jsonl")
+check("a path outside home is left exactly as it is",
+      board_server.display_path("/var/log/adjourn.log") == "/var/log/adjourn.log")
+
+
+# =============================================================================
+print("\n== the settled privacy claim is one sentence, everywhere ==")
+
+from adjourn import meetings_ui  # noqa: E402
+
+check("board and meetings ship the identical claim",
+      board_server.PRIVACY_LINE == meetings_ui.PRIVACY_LINE)
+check("the claim is not the old absolute one",
+      "never leave the Mac" in board_server.PRIVACY_LINE
+      and "only the receipts" in board_server.PRIVACY_LINE)
+for path in ("/", "/ledger", "/connections"):
+    check(f"{path} carries the claim",
+          board_server.PRIVACY_LINE in client.get(path).get_data(as_text=True))
+check("the rail carries it beside the thinking",
+      board_server.PRIVACY_LINE in client.get("/api/fragment").get_json()["guts_html"])
+for template in ("board.html", "meetings.html", "meeting.html",
+                 "meeting_detail.html", "connections.html"):
+    source = (board_server.config.PACKAGE_ROOT / "templates" / template).read_text(
+        encoding="utf-8"
+    )
+    check(f"{template} makes no absolute privacy claim",
+          "never left this machine" not in source
+          and "nothing leaves it" not in source)
 
 
 print("\n== the real journal was never touched ==")

@@ -565,6 +565,31 @@ def _meeting_payload(meta: dict) -> dict:
     return payload
 
 
+def display_speaker(label: Any) -> Any:
+    """"Them" -> ADJOURN_GUEST_NAME, "You" -> the presenter. Never raises.
+
+    THE LAST GATE, and it earns its place by having been missed. Statements that
+    go through extraction are relabelled there and arrive here already readable —
+    but a SEEDED meeting, a backfill from the journal, or anything reconstructed
+    from a stored dict bypasses that pass entirely, and the public graph spent a
+    week labelling half its Statement nodes "Them". This module writes to a graph
+    strangers can read, so it does the rename itself rather than trusting that
+    every caller already did.
+
+    Falls back to the raw label if extraction cannot be imported, because a
+    cosmetic rename must never cost a mirror write.
+    """
+    text = _scalar(label)
+    if not isinstance(text, str) or not text.strip():
+        return text
+    try:
+        from .extraction import speaker_display_name
+
+        return speaker_display_name(text)
+    except Exception:  # noqa: BLE001
+        return text
+
+
 def _statement_rows(statements: list[dict], meeting_id: Any) -> list[dict]:
     """Shape statements into UNWIND rows. Statements without a segment_id are skipped."""
     rows = []
@@ -577,10 +602,13 @@ def _statement_rows(statements: list[dict], meeting_id: Any) -> list[dict]:
         props = _properties(statement, STATEMENT_FIELDS)
         props["segment_id"] = segment_id
         props.setdefault("meeting_id", meeting_id)
+        speaker = display_speaker(statement.get("speaker"))
+        if speaker:
+            props["speaker"] = speaker
         rows.append(
             {
                 "segment_id": segment_id,
-                "speaker": _scalar(statement.get("speaker")) or None,
+                "speaker": speaker or None,
                 "issue": _scalar(statement.get("issue")) or None,
                 "props": props,
             }
@@ -632,6 +660,11 @@ def _write_execution(graph, result: dict) -> None:
 
     props = _properties(result, EXECUTION_FIELDS)
     props.update(key)
+    # Same rename as the statement rows: an Execution carries the speaker onto
+    # the public board, and "Them" reads as a bug there too.
+    speaker = display_speaker(result.get("speaker"))
+    if speaker:
+        props["speaker"] = speaker
     # undo_payload is a dict on the Mac side; FalkorDB holds scalars only.
     undo = result.get("undo_payload")
     props["undo_payload"] = json.dumps(undo or {}, default=str, sort_keys=True)

@@ -178,6 +178,129 @@ def is_engine_reachable() -> bool:
     return bool(fetch_record_status())
 
 
+# --- launching the engine (the one thing this module does that is not a read) --
+#
+# ONE RULE, and it is a macOS rule rather than a style preference: the engine is
+# launched with `open -gj -a MeetingScribe`, NEVER by exec'ing the binary inside
+# the .app. TCC — microphone permission, screen-recording permission, the system
+# audio tap — is granted to a code-signed APPLICATION IDENTITY. A binary spawned
+# as a child of this Python process inherits *our* identity, so it comes up with
+# no microphone access, silently records nothing, and the failure surfaces as an
+# empty transcript twenty minutes later. `open` hands the request to launchd,
+# which starts the app as itself with its own permissions.
+#
+#   -g  do not bring it to the front (the board stays on screen)
+#   -j  launch hidden (no window steals the projector mid-demo)
+#
+# Everything here is best-effort and bounded. A launch that does not come up in
+# ENGINE_LAUNCH_TIMEOUT_SECONDS is reported, not retried and never fatal: the
+# fixtures floor exists precisely so a dead engine degrades instead of stopping.
+
+ENGINE_APP_NAME = "MeetingScribe"
+ENGINE_LAUNCH_TIMEOUT_SECONDS = 30.0
+ENGINE_LAUNCH_POLL_SECONDS = 0.5
+ENGINE_LAUNCH_STATE_FILE = "engine_launch.json"
+
+LAUNCH_ALREADY_RUNNING = "already_running"
+LAUNCH_STARTED = "started"
+LAUNCH_TIMED_OUT = "timed_out"
+LAUNCH_FAILED = "failed"
+
+
+def engine_launch_state_path() -> Path:
+    """Where the last launch attempt is recorded, for the board's UI to render."""
+    return config.state_directory() / ENGINE_LAUNCH_STATE_FILE
+
+
+def read_engine_launch_state() -> dict:
+    """The last launch attempt, or {}. Never raises — this feeds a status pill."""
+    try:
+        return json.loads(engine_launch_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_engine_launch_state(status: str, detail: str, waited_seconds: float) -> dict:
+    """Record one launch attempt where the board can read it. Best effort."""
+    from datetime import datetime, timezone
+
+    state = {
+        "status": status,
+        "detail": detail,
+        "app": ENGINE_APP_NAME,
+        "url": config.meetingscribe_base_url(),
+        "waited_seconds": round(float(waited_seconds), 1),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        path = engine_launch_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    except OSError as error:
+        print(f"[engine] could not record the launch state: {error}")
+    return state
+
+
+def ensure_engine_running(timeout_seconds: float = ENGINE_LAUNCH_TIMEOUT_SECONDS) -> dict:
+    """Make sure MeetingScribe is up, launching it if it is not. Never raises.
+
+    Returns the state dict that was written to state/engine_launch.json:
+
+        {"status": "already_running" | "started" | "timed_out" | "failed",
+         "detail": "...", "app": "MeetingScribe", "url": "http://127.0.0.1:5005",
+         "waited_seconds": 4.5, "at": "..."}
+
+    Call it before a record request and at --watch startup. Callers proceed on
+    "already_running" and "started" and report the other two; nothing here is
+    ever a reason to abort, because the pipeline degrades to fixtures on its own.
+    """
+    import subprocess
+    import time
+
+    if is_engine_reachable():
+        return _write_engine_launch_state(
+            LAUNCH_ALREADY_RUNNING, f"{ENGINE_APP_NAME} was already answering", 0.0
+        )
+
+    base = config.meetingscribe_base_url()
+    print(f"[engine] {base} is not answering — launching {ENGINE_APP_NAME} (open -gj)")
+    try:
+        completed = subprocess.run(
+            ["open", "-gj", "-a", ENGINE_APP_NAME],
+            capture_output=True, text=True, timeout=10,
+            env=config.child_process_environment(),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        detail = f"could not launch {ENGINE_APP_NAME}: {error}"
+        print(f"[engine] {detail}")
+        return _write_engine_launch_state(LAUNCH_FAILED, detail, 0.0)
+    if completed.returncode != 0:
+        detail = (
+            f"`open -a {ENGINE_APP_NAME}` failed: "
+            f"{(completed.stderr or completed.stdout).strip()[:120]}"
+        )
+        print(f"[engine] {detail}")
+        return _write_engine_launch_state(LAUNCH_FAILED, detail, 0.0)
+
+    started_at = time.monotonic()
+    deadline = started_at + max(0.0, float(timeout_seconds))
+    while time.monotonic() < deadline:
+        if is_engine_reachable():
+            waited = time.monotonic() - started_at
+            detail = f"{ENGINE_APP_NAME} answered {RECORD_STATUS_ENDPOINT} after {waited:.1f}s"
+            print(f"[engine] {detail}")
+            return _write_engine_launch_state(LAUNCH_STARTED, detail, waited)
+        time.sleep(ENGINE_LAUNCH_POLL_SECONDS)
+
+    waited = time.monotonic() - started_at
+    detail = (
+        f"{ENGINE_APP_NAME} was launched but {base}{RECORD_STATUS_ENDPOINT} did not "
+        f"answer within {waited:.0f}s — carrying on without it"
+    )
+    print(f"[engine] {detail}")
+    return _write_engine_launch_state(LAUNCH_TIMED_OUT, detail, waited)
+
+
 # --- normalization helpers --------------------------------------------------
 
 

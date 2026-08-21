@@ -17,8 +17,10 @@
     plain hrefs to the board's paths, which is the whole contract — this lane
     does not touch board_server.py. -#}
 <nav class="viewbar" aria-label="Sections">
-  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="{{ url_for('meetings.library') }}">Meetings</a>
+  {#- The mirror of board.html's wordmark. See the note there. -#}
+  <span class="wordmark">Adjourn</span>
   <a class="viewlink {{ 'is-current' if current == 'live' else '' }}" href="{{ url_for('meetings.live_view') }}">Live</a>
+  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="{{ url_for('meetings.library') }}">Meetings</a>
   <a class="viewlink" href="/">Follow-through</a>
   <a class="viewlink" href="/ledger">Ledger</a>
   <a class="viewlink" href="/connections">Connections</a>
@@ -47,6 +49,10 @@
   <div class="card-body">
     <header class="card-top">
       {{ status_chip(row.status, row.status_label) }}
+      {# A replayed tape is labelled as one. The transcript is real; the
+         recording never happened, and the row must not imply otherwise. #}
+      {% if row.replay %}<span class="badge badge-quiet"
+        title="Replayed transcript — no audio was captured for this meeting">REPLAY</span>{% endif %}
       {% if row.has_summary %}<span class="badge badge-quiet">SUMMARY</span>{% endif %}
       {% if row.has_notes %}<span class="badge badge-quiet">NOTES</span>{% endif %}
       {% if row.warning_count %}
@@ -117,23 +123,36 @@
       <h1 class="meeting-title">Meetings</h1>
       <p class="meeting-meta">
         <span class="meta-item totals" data-total-count>{{ library.total }} recording{{ '' if library.total == 1 else 's' }}</span>
-        <span class="meta-item totals" data-total-hours>{{ (library.total_seconds / 3600) | round(1) }} hours</span>
+        {# "0.0 hours" over a real recording reads as a product with nothing in
+           it. Below six minutes the honest figure is minutes, not a rounded
+           zero — the clause is never dropped, only measured in a unit that can
+           carry the number. #}
+        <span class="meta-item totals" data-total-hours>{{ library.total_label }}</span>
         <span class="meta-item">{{ engine_badge(library.online) }}</span>
         {% if library.recording_now %}
         <span class="meta-item"><a class="link" href="{{ url_for('meetings.live_view') }}">one is recording now</a></span>
         {% endif %}
       </p>
     </div>
-    <p class="tagline">Every meeting this machine heard.</p>
+    {# Not "every meeting this machine heard": with the presentation filter on
+       that is a completeness claim the page cannot make. This one is true either
+       way, and says the more useful thing besides. #}
+    <p class="tagline">Recordings, and what followed from them.</p>
   </div>
 </header>
 
 {{ tabbar(current_tab) }}
 
 <main class="mpage">
+  {# The hidden-recording COUNT and the environment variable that hides them are
+     operator detail and go to the server log, not onto a projector. See
+     meetings_ui.PRESENTATION_NOTE. #}
+  {% if library.presentation %}
+  <p class="source-note" data-presentation>{{ library.presentation_note }}</p>
+  {% endif %}
   {% if not library.online %}
   <p class="source-note">
-    The MeetingScribe engine is not answering on {{ library.base_url }} — these rows
+    The engine is not answering on {{ library.base_url }} — these rows
     are read straight off disk, so briefs and note badges are missing.
   </p>
   {% endif %}
@@ -162,7 +181,7 @@
       <h1 class="meeting-title">Live</h1>
       <p class="meeting-meta">
         <span class="meta-item">{{ engine_badge(live.online) }}</span>
-        <span class="meta-item mode-note">captured on this machine, nothing leaves it</span>
+        <span class="meta-item mode-note">{{ privacy_line }}</span>
       </p>
     </div>
     <p class="tagline">What is being said, as it is said.</p>
@@ -174,12 +193,29 @@
 <main class="mpage" data-live
       data-recording="{{ 'true' if live.recording else 'false' }}"
       data-elapsed="{{ live.elapsed }}"
-      data-online="{{ 'true' if live.online else 'false' }}">
+      data-online="{{ 'true' if live.online else 'false' }}"
+      data-mic-name="{{ live.track_names.mic }}"
+      data-system-name="{{ live.track_names.system }}">
 
+  {# THE AUTO-LAUNCH AFFORDANCE. The launch itself belongs to the engine
+     launcher, which the Record proxy calls and which records every attempt in
+     state/engine_launch.json. This panel is the only place a viewer can see any
+     of that. It replaces a line that told the presenter to go and start the
+     engine by hand — which was wrong, because pressing Start does it for them,
+     in the background, without anyone leaving this page. #}
+  <section class="enginebar" data-engine data-state="{{ live.engine.state }}"
+           {{ 'hidden' if live.engine.state == 'up' else '' }}>
+    <span class="engine-dot" aria-hidden="true"></span>
+    <div class="engine-copy">
+      <p class="engine-headline" data-engine-headline>{{ live.engine.headline }}</p>
+      <p class="engine-detail" data-engine-detail>{{ live.engine.detail }}</p>
+    </div>
+    <span class="spacer"></span>
+    <span class="engine-base">{{ live.engine.base_url }}</span>
+  </section>
   {% if not live.online %}
   <p class="source-note">
-    The MeetingScribe engine is not answering on {{ live.base_url }}. Start it and
-    reload — the controls below stay disabled until it does.
+    Nothing below is live until the engine answers on {{ live.base_url }}.
   </p>
   {% endif %}
 
@@ -196,8 +232,15 @@
     </div>
 
     <div class="transport-buttons">
+      {# START STAYS LIVE OVER A CLOSED ENGINE, because pressing it is what
+         STARTS the engine — the proxy launches it in the background before it
+         forwards. Disabling it made the affordance above ("press Start and
+         Adjourn starts the recorder") a sentence over a button nobody could
+         press, and the JavaScript re-enabled it on the first poll anyway, so the
+         server render and the live page disagreed for one second on every load.
+         Stop is a different question: there is nothing to stop. #}
       <button class="transport-btn is-start" type="button" data-start
-              {{ 'disabled' if (live.recording or not live.online) else '' }}>Start recording</button>
+              {{ 'disabled' if live.recording else '' }}>Start recording</button>
       <button class="transport-btn is-stop" type="button" data-stop
               {{ 'disabled' if (not live.recording or not live.online) else '' }}>Stop</button>
     </div>
@@ -209,15 +252,29 @@
   <p class="disk-note" data-disk hidden></p>
   {% endif %}
 
+  {# THE LISTENING STATE. A transport that says RECORDING over a caption pane
+     that says "nothing being said yet" reads, from the back of a room, exactly
+     like a dead transport — which is the failure this whole tab exists to not
+     have. So the recording state is stated twice, in the two places an eye
+     lands: a pulsing chip beside the Captions count, and the empty line itself.
+     Both are server-rendered from live.recording so a reload mid-meeting shows
+     them before any JavaScript runs, and both are re-driven by applyStatus so a
+     recording started from the recorder's own HUD lights them up too. #}
   <h2 class="column-title">
     Captions
     <span class="column-count" data-caption-count>0</span>
+    <span class="listening" data-listening {{ '' if live.recording else 'hidden' }}>
+      <span class="listening-dot" aria-hidden="true"></span>listening
+    </span>
   </h2>
 
-  <section class="captions" data-captions aria-live="polite">
+  <section class="captions" data-captions aria-live="polite"
+           data-listening-state="{{ 'true' if live.recording else 'false' }}">
     <div class="empty-state" data-captions-empty>
       <span class="empty-pulse" aria-hidden="true"></span>
-      <p class="empty-line">Nothing being said yet.</p>
+      <p class="empty-line" data-captions-empty-line>
+        {{ 'Listening. Nothing said yet.' if live.recording else 'Nothing being said yet.' }}
+      </p>
     </div>
   </section>
 </main>
@@ -229,6 +286,8 @@
   <span>Adjourn</span>
   <span class="dot-sep">·</span>
   <span>local-first · the engine is the only source of truth on this page</span>
+  <span class="dot-sep">·</span>
+  <span class="footfall-privacy">{{ privacy_line }}</span>
 </footer>
 
 <script src="{{ url_for('meetings.static', filename='meetings.js') }}" defer></script>

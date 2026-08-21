@@ -25,7 +25,9 @@ are kept because that is what a regression fixture is.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,8 +110,26 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="agi-living-room",
         path=fixture("agi-living-room"),
-        why="the demo meeting",
-        expect_kinds=("github_update", "linear_create", "slack_send"),
+        why="the demo meeting — every action kind the product has, from one bare --replay",
+        # EXACT, and it is the only scenario that earns it. This is the meeting
+        # the room watches: the PR-review beat was merged in from
+        # pr-review-beat.jsonl so a bare `--replay` shows the conflict comment,
+        # the ticket, the SHA-5 move, the Slack countdown, the two holds, the
+        # draft PR AND the inline suggestion on the prop PR. A kind that goes
+        # missing here is a card that does not appear on stage; a kind that
+        # appears here and is not in this list is an unscripted public write.
+        expect_kinds=(
+            "github_update",        # the reversed Redis decision, on issue #2
+            "linear_create",        # the webhook-signature ticket nobody had filed
+            "linear_move",          # SHA-5 -> In Review
+            "pull_request_stub",    # the config-loader draft PR
+            "calendar_hold",        # the 25th, and the Friday review
+            "slack_send",           # the summary, behind its regret window
+            "email_send",           # the deck to Div, behind its regret window
+            "pr_review_suggestion", # the join-button colour, inline on the prop PR
+        ),
+        exact_kinds=True,
+        expect_in_plan=("SHA-5", "#6b7f99"),
     ),
     Scenario(
         name="pr-review-beat",
@@ -242,17 +262,38 @@ def main(argv=None) -> int:
 
     verdicts: list[tuple[str, list[str]]] = []
     total = 0.0
-    for scenario in chosen:
-        if not scenario.path.is_file():
-            verdicts.append((scenario.name, [f"transcript missing: {scenario.path}"]))
-            continue
-        statements, actions, elapsed = replay(scenario)
-        total += elapsed
-        describe(scenario, statements, actions, elapsed, options.verbose)
-        failures = check(scenario, statements, actions)
-        verdicts.append((scenario.name, failures))
-        for failure in failures:
-            print(f"    FAIL  {failure}")
+    # "NOTHING IS WRITTEN" HAS TO BE TRUE, and it was not. Extraction and the
+    # planner report their own progress into adjourn/state/pipeline.json — the
+    # file the board's cold open renders — so this tool used to exit leaving
+    # `extraction: running · batch 5/5` behind it. The cold open then showed
+    # EXTRACTION in amber under a full, permanently stalled progress bar, beside
+    # a WATCHER that said "waiting", with this run's own internals in the
+    # THINKING feed. That is what a judge saw first if the operator ran the
+    # pre-flight in the documented order and did not reset afterwards — and this
+    # tool's whole promise is that it is safe to run five minutes before the
+    # demo. One temp path for the run makes the promise true.
+    with tempfile.TemporaryDirectory(prefix="adjourn-replay-check-") as scratch:
+        previous = os.environ.get("ADJOURN_PIPELINE")
+        os.environ["ADJOURN_PIPELINE"] = str(Path(scratch) / "pipeline.json")
+        try:
+            for scenario in chosen:
+                if not scenario.path.is_file():
+                    verdicts.append(
+                        (scenario.name, [f"transcript missing: {scenario.path}"])
+                    )
+                    continue
+                statements, actions, elapsed = replay(scenario)
+                total += elapsed
+                describe(scenario, statements, actions, elapsed, options.verbose)
+                failures = check(scenario, statements, actions)
+                verdicts.append((scenario.name, failures))
+                for failure in failures:
+                    print(f"    FAIL  {failure}")
+        finally:
+            if previous is None:
+                os.environ.pop("ADJOURN_PIPELINE", None)
+            else:
+                os.environ["ADJOURN_PIPELINE"] = previous
 
     print(f"\n{'=' * 72}")
     broken = [(name, failures) for name, failures in verdicts if failures]

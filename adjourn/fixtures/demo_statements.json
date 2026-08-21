@@ -2,7 +2,7 @@
   "_comment": "Ground truth for agi-living-room.jsonl, hand-written. This is THE demo meeting: eleven statements covering all ten statement kinds, and between them every one of the eight action kinds. Loaded verbatim by extraction.load_fixture_statements('agi-living-room') when no engine is available — the floor under the demo. Also the scoring target for tests/test_understanding_extraction.py.",
   "meeting": {
     "meeting_id": "agi-living-room",
-    "title": "MMM Standup — living room",
+    "title": "Adjourn standup — living room",
     "date": "2026-08-21"
   },
   "statements": [

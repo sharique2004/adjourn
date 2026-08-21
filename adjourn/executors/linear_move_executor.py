@@ -109,6 +109,59 @@ WORK_CLAIM_PHRASES: tuple[str, ...] = (
     "having a go at",
 )
 
+# THE SELF-CLAIM GATE, and why an `assignment` needs one and an `update` does not.
+#
+# "I'm going to take SHA-7 off your plate, picking that up today" and "Priya
+# should take SHA-7" are the same statement KIND — the extractor labels both
+# `assignment` — and they mean opposite things about a shared board. The first is
+# a person telling the room they have started; the second is a suggestion about
+# somebody who may not even be listening. Moving a ticket into In Progress on the
+# second is a lie told in that person's name, in a tool their manager reads.
+#
+# So the assignment route only moves a ticket when the SPEAKER claimed the work.
+# The other routes (`update`, `progress_report`) do not need this: a progress
+# report about someone else's ticket is still a report that it moved.
+SELF_CLAIM_PHRASES: tuple[str, ...] = (
+    "i'll take", "ill take", "i will take", "i'm taking", "im taking",
+    "i am taking", "i'm going to take", "im going to take", "i'll grab",
+    "ill grab", "i'm grabbing", "im grabbing", "i'll pick", "ill pick",
+    "i'm picking", "im picking", "i've picked", "ive picked", "i picked",
+    "i'll own", "ill own", "i'm owning", "im owning", "i'll handle",
+    "ill handle", "i'm handling", "im handling", "i'll run with",
+    "ill run with", "let me take", "give it to me", "i've got it",
+    "ive got it", "i've got", "ive got", "i'm on it", "im on it",
+    "i'll start", "ill start", "i've started", "ive started", "i started",
+    "i'm working on", "im working on", "i am working on",
+    "leave it with me", "that's mine", "thats mine", "i'll do it", "ill do it",
+)
+
+# Phrases that LOOK like a claim and are not one. "I'll take a look at SHA-7" is
+# somebody promising to read a ticket, not to work it; before this list it
+# matched "i'll take" and moved the ticket. These spans are blanked out of the
+# text before the claim scan, so the words either side of them still count.
+NON_CLAIM_SPANS: tuple[str, ...] = (
+    "take a look", "taking a look", "took a look", "take another look",
+    "take a peek", "taking a peek", "take a second look", "have a look",
+    "take a guess", "take your word", "take my word", "take it easy",
+)
+
+
+def is_self_work_claim(spoken_text: str) -> bool:
+    """True when the SPEAKER claimed this work for themselves. Pure table lookup.
+
+        >>> is_self_work_claim("I'm going to take SHA-7 off your plate")
+        True
+        >>> is_self_work_claim("Priya should take SHA-7, she found it")
+        False
+        >>> is_self_work_claim("I'll take a look at SHA-7 after this")
+        False
+    """
+    text = _one_line(spoken_text).lower()
+    for span in NON_CLAIM_SPANS:
+        text = text.replace(span, " ")
+    return any(phrase in text for phrase in SELF_CLAIM_PHRASES)
+
+
 # Where each column sits on the road to done, for the never-move-backwards rule.
 STATE_RANK: dict[str, int] = {
     "backlog": 0, "todo": 0, "to do": 0, "unstarted": 0, "triage": 0, "icebox": 0,
@@ -316,7 +369,14 @@ def build_comment_markdown(action: Action, previous_state: str, target_state: st
     lines = [f"Moved **{previous_state or 'its previous state'} → {target_state}** by Adjourn."]
     if quote:
         lines += ["", f"> **{speaker}:** {quote}"]
-    lines += ["", f"_Said during {meeting}; the transcript never left that machine._"]
+    # Precise, and directly under the quote it is describing. See the note in
+    # github_update_executor's footer: the absolute claim is false the moment a
+    # verbatim sentence is printed on somebody else's server.
+    lines += [
+        "",
+        f"_Said during {meeting}; the audio and the full transcript stayed on that Mac — "
+        f"the sentence quoted above is the only text that travelled._",
+    ]
     return "\n".join(lines) + "\n"
 
 

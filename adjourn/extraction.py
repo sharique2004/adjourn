@@ -600,6 +600,62 @@ def extract_with_gemini(
 # --- the shared batch loop (both engines run through this) -------------------
 
 
+def _report_batch_progress(index: int, total: int, lines: int) -> None:
+    """Push one batch boundary onto the board's rail. Never raises.
+
+    Imported LAZILY because orchestrator imports this module; a module-level
+    import would be a cycle. Wrapped whole because the rail is a nicety and
+    extraction is not — a status file must never take a meeting down with it.
+
+    This is the call that makes the brief's "rail must move, not freeze idle"
+    literally true: it fires from inside the loop at each batch boundary, so the
+    bar advances while the model is still working, rather than jumping from
+    empty to full when the pass ends.
+    """
+    try:
+        from . import orchestrator
+
+        # MERGE, do not replace. report_pipeline swaps the whole extraction
+        # block, so building a fresh status here would blank `source` — the
+        # live/final/fixture label the board prints next to the bar — for the
+        # entire time the bar is actually moving.
+        current = orchestrator.read_pipeline_status().extraction
+        current.phase = orchestrator.STAGE_RUNNING
+        current.detail = f"extracting… batch {index} of {total}"
+        current.batch_index = index
+        current.batch_total = total
+        orchestrator.report_pipeline(extraction=current)
+        orchestrator.report_pipeline_event(
+            stage="extraction",
+            tone="note",
+            label="batch",
+            text=f"batch {index}/{total} · {lines} lines",
+        )
+    except Exception:  # noqa: BLE001 — the rail is never worth a failed meeting
+        pass
+
+
+def _report_statement(statement: Statement) -> None:
+    """One rail row per statement as it lands. Never raises.
+
+    The restraint rows matter as much as the action rows — "eighteen of
+    twenty-eight lines produced nothing at all" is the product — so a negated,
+    rejected or third-party statement is emitted as `ignore` with the reason
+    rather than dropped from the narration.
+    """
+    try:
+        from . import orchestrator
+
+        orchestrator.report_pipeline_event(
+            stage="extraction",
+            tone="ignore" if statement.fires_no_work else "act",
+            label=statement.kind or "statement",
+            text=statement.claim or statement.quote,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _run_one_batch(
     batch: list[dict],
     meeting_title: str,
@@ -683,13 +739,30 @@ def _extract_in_batches(
     if not batches:
         return []
 
+    # Batches can finish out of order under the thread pool, so the number the
+    # rail shows is how many have COMPLETED, not which one was submitted last.
+    # That is the honest reading of a progress bar and the only one that never
+    # goes backwards on screen.
+    completed = 0
+    total_batches = len(batches)
+
+    def mark_batch_done(lines: int) -> None:
+        nonlocal completed
+        completed += 1
+        _report_batch_progress(completed, total_batches, lines)
+
     def absorb(kept: list[Statement]) -> None:
         collected.extend(kept)
         for statement in kept:
             if statement.topic and statement.topic not in seen_topics:
                 seen_topics.append(statement.topic)
+            _report_statement(statement)
 
     started_at = time.monotonic()
+    # Publish the denominator before the first call so the bar exists (at 0/N)
+    # during the longest single wait of the whole pass rather than appearing
+    # only once the first batch has already come back.
+    _report_batch_progress(0, total_batches, len(segments))
     # The first batch runs alone only when it has a vocabulary job to do. With a
     # seeded memory the topic names are ALREADY settled (and snapped to handles
     # afterwards regardless), so making every other batch wait on one call buys
@@ -700,6 +773,7 @@ def _extract_in_batches(
             batches[0], meeting_title, seen_topics,
             engine=engine, call_engine=call_engine, label=f"1/{len(batches)}",
         ))
+        mark_batch_done(len(batches[0]))
         remaining = batches[1:]
     else:
         print(f"[scribe] {engine}: vocabulary already seeded ({len(seen_topics)} topics) — "
@@ -721,11 +795,15 @@ def _extract_in_batches(
                 )
                 for number, batch in enumerate(remaining, first_label)
             ]
-            for future in futures:  # in submission order — transcript order is preserved
+            for future, batch in zip(futures, remaining, strict=False):
+                # In submission order — transcript order is preserved.
                 try:
                     absorb(future.result())
                 except Exception as error:  # noqa: BLE001 — one bad batch is not the meeting
                     print(f"[scribe] {engine}: a batch failed ({error.__class__.__name__}: {error}) — skipped")
+                # Counted either way: a skipped batch is finished, and a bar that
+                # stalls on a failure reads as a hang rather than as a loss.
+                mark_batch_done(len(batch))
     else:
         for number, batch in enumerate(remaining, len(batches) - len(remaining) + 1):
             try:
@@ -735,6 +813,7 @@ def _extract_in_batches(
                 ))
             except Exception as error:  # noqa: BLE001
                 print(f"[scribe] {engine}: a batch failed ({error.__class__.__name__}: {error}) — skipped")
+            mark_batch_done(len(batch))
 
     print(
         f"[scribe] {engine}: {len(collected)} statements from {len(segments)} segments "
@@ -1315,7 +1394,19 @@ DEFAULT_SPEAKER_NAME = "Sharique"
 # inventing a "Priya" who was never identified. When diarisation DOES name a
 # speaker, that name arrives here already and passes straight through.
 SYSTEM_TRACK_LABELS: frozenset[str] = frozenset({"them", "other", "others", "system"})
-DEFAULT_OTHER_SPEAKER_NAME = "A teammate"
+DEFAULT_GUEST_NAME = "Guest"
+# The name this setting used to have. Still honoured, so a .env or a runbook that
+# names the old one keeps working; ADJOURN_GUEST_NAME wins when both are set.
+LEGACY_GUEST_SETTING = "ADJOURN_OTHER_SPEAKER_NAME"
+
+
+def guest_display_name() -> str:
+    """The name everyone on the system track is shown under. One place, read live."""
+    return (
+        config.read_setting("ADJOURN_GUEST_NAME")
+        or config.read_setting(LEGACY_GUEST_SETTING)
+        or DEFAULT_GUEST_NAME
+    )
 
 
 def speaker_display_name(label: str) -> str:
@@ -1324,8 +1415,16 @@ def speaker_display_name(label: str) -> str:
     Reads its settings at call time (config reads .env at call time), so a
     different presenter needs one line in .env and no code change.
 
-        ADJOURN_SPEAKER_NAME        the person holding the microphone
-        ADJOURN_OTHER_SPEAKER_NAME  everyone on the far end of the call
+        ADJOURN_SPEAKER_NAME  the person holding the microphone
+        ADJOURN_GUEST_NAME    everyone on the far end of the call ("Guest")
+
+    APPLIED IN EXACTLY ONE PLACE and then everywhere downstream: the planner
+    copies Statement.speaker onto Action.speaker, so this one pass fixes the
+    Slack body, the Linear comment, the GitHub blockquote, the recap ledger AND
+    the Statement nodes in both graphs. cloud_mirror calls it again at the write
+    boundary, because a seeded or backfilled row can reach the cloud without ever
+    having passed through here — which is how the public graph ended up labelling
+    a speaker "Them".
     """
     text = str(label or "")
     key = text.strip().lower()
@@ -1333,8 +1432,7 @@ def speaker_display_name(label: str) -> str:
         return config.read_setting("ADJOURN_SPEAKER_NAME",
                                    DEFAULT_SPEAKER_NAME) or DEFAULT_SPEAKER_NAME
     if key in SYSTEM_TRACK_LABELS:
-        return config.read_setting("ADJOURN_OTHER_SPEAKER_NAME",
-                                   DEFAULT_OTHER_SPEAKER_NAME) or DEFAULT_OTHER_SPEAKER_NAME
+        return guest_display_name()
     return text
 
 

@@ -41,6 +41,23 @@ and branch names of that ONE repo's open PRs and must both clear a floor and
 beat the runner-up; two PRs that look equally likely is the same answer as none.
 
 -----------------------------------------------------------------------------
+ WHAT THIS EXECUTOR WILL NEVER DO — A MEETING DOES NOT COMMIT CODE
+-----------------------------------------------------------------------------
+There are exactly two outcomes above, and both of them are a REQUEST that a
+human accepts or dismisses. Adjourn never commits, never pushes, and never
+applies a patch that came out of somebody's mouth. There is no opt-in list, no
+branch allowlist, and no env var that upgrades a suggestion into a write — the
+capability is ABSENT from this module rather than defaulted off, because a
+default is a thing that can be flipped by editing one line of a .env file at
+2am, and "software pushed to my branch while I was in a meeting" is not a
+recoverable sentence.
+
+The only writes here are a review, an inline comment, and an issue comment —
+every one of them reversible by `undo()`, which is the whole reason this
+executor is allowed to write at all. If a future change needs the diff applied,
+that is a human clicking "Commit suggestion" on GitHub, not this file.
+
+-----------------------------------------------------------------------------
  WHY SIM MODE READS (deliberate, and narrower than it looks)
 -----------------------------------------------------------------------------
 Every other executor here can render its sim payload from the action alone.
@@ -144,6 +161,9 @@ DIFF_HUNK_HEADER_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@"
 DIFF_SIDE = "RIGHT"
 
 MAX_REPORTED_CANDIDATES = 5
+
+# There is deliberately no commit path below this line. A meeting suggests; the
+# people on the pull request decide. See the module docstring.
 
 
 @dataclass(frozen=True)
@@ -447,15 +467,23 @@ def _excerpt_block(action: Action, timestamp: str = "") -> list[str]:
 
 
 def _footer(action: Action) -> str:
-    """One provenance line, matching github_update's. Pure."""
+    """One provenance line, matching github_update's. Pure.
+
+    "nothing was pushed" is unconditional because it is unconditionally true:
+    this executor has no commit path. The privacy claim is scoped to what
+    actually travelled — the one quoted sentence — rather than the absolute
+    "the transcript never left this machine", which used to print three lines
+    under a verbatim excerpt of that transcript, on a public pull request.
+    """
     payload = action.payload
     meeting = _one_line(payload.get("meeting_title", "")) or "an untitled meeting"
     meeting_date = _one_line(payload.get("meeting_date", ""))
     return (
         f"_Meeting: {meeting}"
         + (f", {meeting_date}" if meeting_date else "")
-        + " · Suggested by Adjourn the moment the meeting ended · "
-        "nothing was pushed · transcript never left this machine_"
+        + " · Suggested by Adjourn the moment the meeting ended · nothing was pushed · "
+        + "the audio and the full transcript stayed on that Mac — the sentence "
+        "quoted above is the only text that travelled_"
     )
 
 
@@ -700,6 +728,14 @@ def execute(action: Action) -> results.ExecutorResult:
         )
 
     print(f"[{ACTION_KIND}] {location_reason}")
+
+    # There is no fork here. Every branch — the prop PR's, yours, anyone's —
+    # gets the change SUGGESTED. The head branch is recorded on the payload for
+    # the card's provenance only; nothing in this module can act on it.
+    head_branch = _one_line((pull_request.get("head") or {}).get("ref", ""))
+    payload.setdefault("head_branch", head_branch)
+    print(f"[{ACTION_KIND}] suggesting on {head_branch or 'the head branch'} — a meeting never commits")
+
     request = build_review_request(repo, pull_number, action, located)
     summary = _one_line(payload.get("human_preview", "")) or summarize_suggestion(
         pull_number, action
@@ -826,10 +862,23 @@ def undo(result: results.ExecutorResult) -> bool:
     if not pull_number or not review_id:
         return False
 
-    reversed_everything = True
+    # Blank the review body FIRST — permitted only while an inline comment is
+    # still attached — then delete the comment(s). See _remove_review, and the
+    # module docstring for why the other order strands a review forever.
+    return _remove_review(repo, int(pull_number), str(review_id), comment_ids)
 
-    # 1. Blank the review body FIRST — permitted only while an inline comment is
-    #    still attached. Reverse this order and the review is stranded forever.
+
+def _remove_review(
+    repo: str,
+    pull_number: int,
+    review_id: str,
+    comment_ids: list[str],
+) -> bool:
+    """Blank-then-delete, the only order GitHub allows. True when the review is gone."""
+    if not pull_number or not review_id:
+        return True  # nothing was posted; nothing to take back
+
+    reversed_everything = True
     try:
         run_github_cli(
             "api", "-X", "PUT", f"repos/{repo}/pulls/{pull_number}/reviews/{review_id}",
@@ -842,7 +891,6 @@ def undo(result: results.ExecutorResult) -> bool:
         print(f"[{ACTION_KIND}] could not blank review {review_id}: {error}")
         reversed_everything = False
 
-    # 2. Then delete the inline comment(s); GitHub drops the now-empty review.
     for comment_id in comment_ids:
         try:
             run_github_cli("api", "-X", "DELETE", f"repos/{repo}/pulls/comments/{comment_id}")
@@ -853,7 +901,7 @@ def undo(result: results.ExecutorResult) -> bool:
                 print(f"[{ACTION_KIND}] could not delete review comment {comment_id}: {error}")
                 reversed_everything = False
 
-    return reversed_everything and review_is_gone(repo, int(pull_number), str(review_id))
+    return reversed_everything and review_is_gone(repo, pull_number, review_id)
 
 
 def review_is_gone(repo: str, pull_number: int, review_id: str) -> bool:

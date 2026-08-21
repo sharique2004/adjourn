@@ -129,6 +129,14 @@ class ExtractionStatus:
     kinds: dict = field(default_factory=dict)
     source: str = ""
     detail: str = "idle"
+    # batch_index/batch_total are what make the rail MOVE during the ~25s the
+    # model is working. They are written from inside the extraction loop, one
+    # report per batch boundary — not at the end, where they would only ever
+    # render the final value and the bar would jump from empty to full. The
+    # board renders "batch 2/4" and a progress bar whenever batch_total > 0, and
+    # renders no bar at all when it is 0, so an un-batched pass loses nothing.
+    batch_index: int = 0  # 1-based, the batch in flight (or the last one done)
+    batch_total: int = 0  # batches this pass will run; 0 == not batching
 
     def to_dict(self) -> dict:
         return {
@@ -139,6 +147,8 @@ class ExtractionStatus:
             "kinds": dict(self.kinds),
             "source": self.source,
             "detail": self.detail,
+            "batch_index": self.batch_index,
+            "batch_total": self.batch_total,
         }
 
     @classmethod
@@ -153,6 +163,8 @@ class ExtractionStatus:
             kinds=dict(kinds) if isinstance(kinds, dict) else {},
             source=str(data.get("source") or ""),
             detail=str(data.get("detail") or STAGE_IDLE),
+            batch_index=int(data.get("batch_index") or 0),
+            batch_total=int(data.get("batch_total") or 0),
         )
 
 
@@ -213,6 +225,12 @@ class PipelineStatus:
     watcher: WatcherStatus = field(default_factory=WatcherStatus)
     extraction: ExtractionStatus = field(default_factory=ExtractionStatus)
     planner: PlannerStatus = field(default_factory=PlannerStatus)
+    # The narrated rail: one row per statement, per decision, per fire — which is
+    # what makes the panel read as thinking rather than as a progress bar. Newest
+    # LAST (the board scrolls to the bottom); at most FEED_LIMIT rows so a 1s poll
+    # stays free; `seq` restarts at 1 each run and the board treats a lower seq as
+    # a new run and clears. See FEED_LIMIT / report_pipeline_event below.
+    feed: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -224,11 +242,14 @@ class PipelineStatus:
             "watcher": self.watcher.to_dict(),
             "extraction": self.extraction.to_dict(),
             "planner": self.planner.to_dict(),
+            "feed": [dict(row) for row in self.feed if isinstance(row, dict)],
         }
 
     @classmethod
     def from_dict(cls, data: dict | None) -> PipelineStatus:
         data = data if isinstance(data, dict) else {}
+        raw_feed = data.get("feed")
+        feed = [row for row in raw_feed if isinstance(row, dict)] if isinstance(raw_feed, list) else []
         return cls(
             updated_at=str(data.get("updated_at") or ""),
             mode=str(data.get("mode") or "idle"),
@@ -238,6 +259,7 @@ class PipelineStatus:
             watcher=WatcherStatus.from_dict(data.get("watcher")),
             extraction=ExtractionStatus.from_dict(data.get("extraction")),
             planner=PlannerStatus.from_dict(data.get("planner")),
+            feed=feed,
         )
 
 
@@ -287,6 +309,7 @@ def report_pipeline(
     watcher: WatcherStatus | dict | None = None,
     extraction: ExtractionStatus | dict | None = None,
     planner: PlannerStatus | dict | None = None,
+    feed_reset: bool = False,
     path: Path | None = None,
 ) -> PipelineStatus:
     """Merge a stage update into pipeline.json. Never raises.
@@ -294,8 +317,15 @@ def report_pipeline(
     Called at each real transition (watch start, meeting stopped, extraction
     running/done, planner done, replay start). Not on every watcher tick — a
     ticking clock must not churn the board fragment.
+
+    `feed_reset=True` empties the narrated feed so `seq` restarts at 1. Call it
+    exactly where a RUN begins — replay start, and the watcher's transcript_ready
+    -> extraction handoff — because without it the rail opens the next meeting
+    still showing the previous meeting's thinking.
     """
     status = read_pipeline_status(path)
+    if feed_reset:
+        status.feed = []
     if mode is not None:
         status.mode = mode
     if pass_name is not None:
@@ -323,6 +353,87 @@ def report_pipeline(
     except Exception as error:  # noqa: BLE001 — a status file must never kill a run
         print(f"[orchestrator] pipeline status update failed: {error}")
     return status
+
+
+# --- the narrated feed ------------------------------------------------------
+
+FEED_LIMIT = 80  # rows kept in pipeline.json; the file is read once a second
+FEED_TEXT_LIMIT = 140  # characters; this file is read by a page on a projector
+FEED_LABEL_LIMIT = 24  # characters; the chip is one short word
+FEED_STAGES: frozenset[str] = frozenset({"watcher", "extraction", "planner", "executor"})
+FEED_TONES: frozenset[str] = frozenset({"act", "hold", "ignore", "decline", "note"})
+
+
+def _trim_feed_text(value: str, limit: int) -> str:
+    """One line, at most `limit` chars, ellipsis when it had to be cut. Pure."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def report_pipeline_event(
+    *,
+    stage: str,
+    tone: str = "note",
+    label: str = "",
+    text: str = "",
+    path: Path | None = None,
+) -> None:
+    """Append one line to pipeline.json's feed. Never raises.
+
+    The writer owns the shape entirely — the board only truncates for display —
+    so trimming happens HERE: `text` is capped at 140 characters and the list at
+    80 rows, because the alternative is a status file that grows without bound
+    and a 1s poll that stops being free.
+
+    `seq` is monotonic within a run and is what the board de-duplicates and
+    animates on. It is derived from the highest seq already in the file rather
+    than from a counter in memory, so a fresh process joining mid-run (the
+    watcher and a replay do not share one) cannot rewind the rail.
+    """
+    try:
+        stage_name = str(stage or "").strip().lower()
+        if stage_name not in FEED_STAGES:
+            return
+        tone_name = str(tone or "note").strip().lower()
+        if tone_name not in FEED_TONES:
+            tone_name = "note"
+        status = read_pipeline_status(path)
+        highest = 0
+        for row in status.feed:
+            try:
+                highest = max(highest, int(row.get("seq") or 0))
+            except (TypeError, ValueError):
+                continue
+        status.feed = [*status.feed, {
+            "seq": highest + 1,
+            "at": results.utc_timestamp(),
+            "stage": stage_name,
+            "tone": tone_name,
+            "label": _trim_feed_text(label, FEED_LABEL_LIMIT).lower(),
+            "text": _trim_feed_text(text, FEED_TEXT_LIMIT),
+        }][-FEED_LIMIT:]
+        write_pipeline_status(status, path)
+    except Exception as error:  # noqa: BLE001 — a status file must never kill a run
+        print(f"[orchestrator] pipeline feed event failed: {error}")
+
+
+def feed_belongs_to_a_new_run(meeting_id: str, path: Path | None = None) -> bool:
+    """True when the rail is still showing a DIFFERENT meeting's thinking.
+
+    The reset is keyed on the meeting rather than on the pass because one
+    meeting is narrated twice — the fast pass at the stop edge and the final
+    reconcile when the transcript lands. Resetting per pass would blank the rail
+    the room just watched fill; resetting per meeting is what the rule
+    ("the rail must not open the next meeting on the last one's rows") actually
+    means.
+    """
+    try:
+        current = read_pipeline_status(path).meeting_id
+    except Exception:  # noqa: BLE001
+        return True
+    return bool(meeting_id) and current != meeting_id
 
 
 def count_kinds(items) -> dict[str, int]:
@@ -396,6 +507,46 @@ def extraction_status_from_statements(
         source=source,
         detail=" · ".join(parts),
     )
+
+
+def narrate_plan(statements: list, actions: list[Action]) -> None:
+    """Emit one rail row per routed statement, per ignored line, per refusal.
+
+    The restraint rows are the point. A rail that only shows what fired reads as
+    a progress bar; a rail that shows "chatter → ignored" and "declined: negated"
+    next to "ticket_request → linear_create" reads as judgement, which is the
+    thing the room is actually being asked to believe. Never raises.
+    """
+    try:
+        acted_bases: dict[str, list[str]] = {}
+        for action in actions or []:
+            if action.kind == "recap_page":
+                continue
+            base = str(action.segment_id or "").split(".", 1)[0]
+            if base:
+                acted_bases.setdefault(base, []).append(action.kind)
+        for statement in statements or []:
+            base = str(getattr(statement, "segment_id", "") or "").split(".", 1)[0]
+            kind = str(getattr(statement, "kind", "") or "statement")
+            fired = acted_bases.get(base) or []
+            if fired:
+                report_pipeline_event(
+                    stage="planner", tone="act", label=kind,
+                    text=f"{kind} → {', '.join(dict.fromkeys(fired))}",
+                )
+                continue
+            reason = str(getattr(statement, "restraint_reason", "") or "")
+            if getattr(statement, "fires_no_work", False):
+                report_pipeline_event(
+                    stage="planner", tone="decline", label=kind,
+                    text=f"declined: {reason}" if reason else f"{kind} → declined",
+                )
+                continue
+            report_pipeline_event(
+                stage="planner", tone="ignore", label=kind, text=f"{kind} → ignored",
+            )
+    except Exception as error:  # noqa: BLE001 — narration is never worth a run
+        print(f"[orchestrator] could not narrate the plan: {error}")
 
 
 def planner_status_from_plan(statements: list, actions: list[Action]) -> PlannerStatus:
@@ -1132,6 +1283,64 @@ def drain_cloud_mirrors(timeout_seconds: float | None = None) -> int:
     return len(outstanding)
 
 
+# --- the idle flush ---------------------------------------------------------
+#
+# A rehearsal held while the cloud is unreachable queues its writes into
+# state/mirror_backlog.jsonl, and nothing drains that file until the NEXT
+# successful mirror — which, between demos, may be hours away or never. So the
+# public board sits empty while a perfectly good backlog waits on disk, and then
+# fires the lot into the graph at the worst possible moment: the middle of the
+# next run.
+#
+# The watcher ticks twice a second doing nothing. That is the right place to
+# drain it: no meeting is in flight, no action is waiting, and the work goes on a
+# daemon thread anyway. Throttled, silent when there is nothing to do, and it
+# never runs while an actual mirror write is outstanding.
+MIRROR_IDLE_FLUSH_INTERVAL_SECONDS = 30.0
+_last_idle_flush_at = 0.0
+
+
+def flush_cloud_backlog_when_idle(now: float | None = None) -> bool:
+    """Opportunistically drain the mirror backlog on an idle tick. Never raises.
+
+    Returns True when a flush was actually started. Cheap on the common path: a
+    monotonic comparison, then one stat of the backlog file.
+    """
+    global _last_idle_flush_at
+
+    moment = time.monotonic() if now is None else now
+    if moment - _last_idle_flush_at < MIRROR_IDLE_FLUSH_INTERVAL_SECONDS:
+        return False
+    _last_idle_flush_at = moment
+
+    with _mirror_threads_lock:
+        if any(item.is_alive() for item in _mirror_threads):
+            return False  # a real mirror write is in flight; it flushes on its own
+
+    try:
+        from . import cloud_mirror
+
+        if not cloud_mirror.is_configured():
+            return False
+        depth = cloud_mirror.backlog_depth()
+    except Exception:  # noqa: BLE001 — an idle nicety must never break the loop
+        return False
+    if depth <= 0:
+        return False
+
+    print(f"[mirror] idle — draining {depth} queued write(s) to the cloud")
+
+    def drain() -> None:
+        from . import cloud_mirror
+
+        sent = cloud_mirror.flush_backlog()
+        if sent:
+            print(f"[mirror] idle flush sent {sent} write(s); backlog now {cloud_mirror.backlog_depth()}")
+
+    mirror_in_background("idle backlog flush", drain)
+    return True
+
+
 def mirror_execution_in_background(result: results.ExecutorResult, dedup_key: str = "") -> None:
     """Mirror one fired action to FalkorDB Cloud without making anyone wait for it."""
     record = dict(result.to_record())
@@ -1193,6 +1402,11 @@ def fire_action(
             f"[orchestrator] queued {action.kind} for {action.regret_window_s}s "
             f"(fires {entry.fire_at} unless cancelled) — {action.dedup_key}"
         )
+        report_pipeline_event(
+            stage="executor", tone="hold", label=action.kind,
+            text=f"holding {action.regret_window_s}s · "
+                 f"{action.payload.get('human_preview') or action.kind}",
+        )
         return None
 
     result = executors.execute_action(action)
@@ -1206,6 +1420,12 @@ def fire_action(
     record_action_safely(memory, action, result)
     status = "ok" if result.ok else "FAILED"
     print(f"[orchestrator] {action.kind} [{result.mode}] {status}: {result.human_summary}")
+    report_pipeline_event(
+        stage="executor",
+        tone="act" if result.ok else "decline",
+        label=action.kind,
+        text=f"{result.human_summary} · {result.mode}",
+    )
     return result
 
 
@@ -1473,6 +1693,11 @@ def handle_meeting_stopped(meeting_id: str, memory=None) -> list[results.Executo
             watcher=watcher_status_stopped(meeting_id),
             extraction=extraction_status_running(extraction.SOURCE_LIVE),
             planner=PlannerStatus(phase=STAGE_IDLE, detail="idle"),
+            feed_reset=feed_belongs_to_a_new_run(meeting_id),
+        )
+        report_pipeline_event(
+            stage="watcher", tone="note", label="stopped",
+            text=f"{title} ended · {len(segments)} live lines to read",
         )
         statements = extract_statements_safely(
             segments, title, source=extraction.SOURCE_LIVE,
@@ -1493,6 +1718,7 @@ def handle_meeting_stopped(meeting_id: str, memory=None) -> list[results.Executo
         actions = plan_actions_safely(
             statements, memory, meeting=meeting, conflict_verdicts=verdicts
         )
+        narrate_plan(statements, actions)
         report_pipeline(planner=planner_status_from_plan(statements, actions))
         new_actions = select_new_actions(actions, already_handled_keys(meeting_id), memory)
         print(
@@ -1541,6 +1767,11 @@ def reconcile_from_final_transcript(meeting_id: str, memory=None) -> list[result
             watcher=watcher_status_transcript_ready(meeting_id),
             extraction=extraction_status_running(extraction.SOURCE_FINAL),
             planner=PlannerStatus(phase=STAGE_IDLE, detail="idle"),
+            feed_reset=feed_belongs_to_a_new_run(meeting_id),
+        )
+        report_pipeline_event(
+            stage="watcher", tone="note", label="transcript",
+            text=f"final transcript ready · {len(segments)} lines",
         )
         statements = extract_statements_safely(
             segments, title, source=extraction.SOURCE_FINAL,
@@ -1561,6 +1792,7 @@ def reconcile_from_final_transcript(meeting_id: str, memory=None) -> list[result
         actions = plan_actions_safely(
             statements, memory, meeting=meeting, conflict_verdicts=verdicts
         )
+        narrate_plan(statements, actions)
         report_pipeline(planner=planner_status_from_plan(statements, actions))
         new_actions = select_new_actions(actions, already_handled_keys(meeting_id), memory)
         print(
@@ -1730,6 +1962,15 @@ def run_orchestrator(*, stop_after_seconds: float | None = None) -> None:
     """
     config.ensure_state_directories()
     memory = open_memory_safely()
+    # Before anything reads the engine: start it if it is not up. Bounded,
+    # best-effort, and it writes state/engine_launch.json so the board can show
+    # what happened rather than leaving a dead dot with no explanation.
+    launch = meetingscribe_source.ensure_engine_running()
+    if launch.get("status") not in (
+        meetingscribe_source.LAUNCH_ALREADY_RUNNING,
+        meetingscribe_source.LAUNCH_STARTED,
+    ):
+        print(f"[orchestrator] engine not available: {launch.get('detail', '')}")
     source = meetingscribe_source.describe_source()
     print(f"[orchestrator] engine {source['engine']} reachable={source['reachable']}")
     print(f"[orchestrator] journal {config.executions_journal_path()}")
@@ -1769,10 +2010,18 @@ def run_orchestrator(*, stop_after_seconds: float | None = None) -> None:
 
     def tick() -> None:
         tick_pending_actions(memory)
+        # Nothing is in flight on a tick, so this is the cheapest moment in the
+        # program to hand the cloud whatever a previous offline rehearsal queued.
+        flush_cloud_backlog_when_idle()
 
     try:
         watcher.watch_for_meeting_events(
-            handle, on_tick=tick, stop_after_seconds=stop_after_seconds
+            handle,
+            on_tick=tick,
+            stop_after_seconds=stop_after_seconds,
+            # Already launched above, before describe_source() reported on it.
+            # The watcher's own flag is for anyone driving the loop directly.
+            launch_engine=False,
         )
     except KeyboardInterrupt:
         print("\n[orchestrator] stopped")
@@ -1892,6 +2141,13 @@ def _replay_transcript_file(path: Path) -> list[results.ExecutorResult]:
         watcher=watcher_status_transcript_ready(meeting_id, replay=True),
         extraction=extraction_status_running(source if source else "fixture"),
         planner=PlannerStatus(phase=STAGE_IDLE, detail="idle"),
+        # A replay is unconditionally a new run: it is the command you type to
+        # start the story over, so the rail starts empty every time.
+        feed_reset=True,
+    )
+    report_pipeline_event(
+        stage="watcher", tone="note", label="replay",
+        text=f"{title} · {len(segments)} lines to read",
     )
 
     memory = open_memory_safely()
@@ -1909,6 +2165,7 @@ def _replay_transcript_file(path: Path) -> list[results.ExecutorResult]:
         actions = plan_actions_safely(
             statements, memory, meeting=meeting, conflict_verdicts=verdicts
         )
+        narrate_plan(statements, actions)
         report_pipeline(planner=planner_status_from_plan(statements, actions))
         new_actions = select_new_actions(actions, already_handled_keys(meeting_id), memory)
         print(
@@ -2017,6 +2274,7 @@ def _replay_json_file(path: Path) -> list[results.ExecutorResult]:
         record_statements_safely(memory, statements, meeting_id, meeting)
         report_pipeline(planner=PlannerStatus(phase=STAGE_RUNNING, detail="routing through the table…"))
         actions = plan_actions_safely(statements, memory, meeting=meeting)
+        narrate_plan(statements, actions)
         report_pipeline(planner=planner_status_from_plan(statements, actions))
         new_actions = select_new_actions(actions, already_handled_keys(meeting_id), memory)
         upgrade_recap_quotes(meeting_id, actions)

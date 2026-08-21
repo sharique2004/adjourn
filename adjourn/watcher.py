@@ -315,6 +315,10 @@ def watch_for_meeting_events(
     on_tick: Callable[[], None] | None = None,
     state_path: Path | None = None,
     persist: bool = True,
+    # Default OFF so nothing that merely exercises the loop — a test, a bounded
+    # smoke run — can start an application on somebody's Mac. run_orchestrator
+    # passes True; that is the "--watch startup" the runbook means.
+    launch_engine: bool = False,
 ) -> None:
     """Poll the engine forever, calling `on_event` for every detected edge.
 
@@ -324,7 +328,15 @@ def watch_for_meeting_events(
 
     `on_tick` fires once per fast tick regardless of events — the orchestrator
     hangs its regret-window countdown on it, so the two never need separate threads.
+
+    `launch_engine` starts MeetingScribe when it is not already up. Priming reads
+    the engine, so this has to happen BEFORE prime_watch_state or the watcher
+    primes against a dead port and spends its first thirty seconds in backoff
+    while the engine it just started comes up behind it.
     """
+    if launch_engine:
+        meetingscribe_source.ensure_engine_running()
+
     if state is None:
         state = load_watch_state(state_path) if persist else WatchState()
     if not state.is_primed:

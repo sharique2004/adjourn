@@ -7,6 +7,7 @@ What it clears (all local, all reversible by simply running the demo again):
     adjourn/state/pipeline.json         guts-panel phases
     adjourn/state/recap_actions/*.json  parked recap actions
     adjourn/state/watcher.json          so the watcher primes fresh
+    adjourn/state/engine_launch.json    last MeetingScribe launch, for the UI pill
     adjourn/recaps/*.html               previously written recaps
     adjourn/state/holds/*.ics           previously written calendar holds
 
@@ -299,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
     clear_file(config.pending_actions_path(), "pending countdowns")
     clear_file(config.pipeline_status_path(), "pipeline status")
     clear_file(config.state_directory() / "watcher.json", "watcher state")
+    # A launch record from a rehearsal describes a launch that is no longer
+    # happening. The board renders it, so a stale one is a status pill telling
+    # the room about an engine start from forty minutes ago.
+    clear_file(config.state_directory() / "engine_launch.json", "engine launch status")
     clear_directory_contents(config.recaps_directory(), ("*.html", "*.bak"), "recaps")
     clear_directory_contents(config.state_directory() / "holds", ("*.ics",), "calendar holds")
     clear_directory_contents(
@@ -309,7 +314,20 @@ def main(argv: list[str] | None = None) -> int:
         from . import seed_memory
 
         print("\n[reset] re-seeding memory")
-        return seed_memory.main(["--wipe"])
+        code = seed_memory.main(["--wipe"])
+        # The re-seed runs the REAL extract -> plan -> execute path to derive
+        # last week's receipts, and that path reports itself to the pipeline
+        # status file the same way a live meeting does. Clearing before the
+        # re-seed is therefore not enough: the seeder refills it on its way
+        # out, and the cold open then renders EXTRACTION "running · batch 2/2"
+        # with a stalled bar and the seeder's own statements in the Thinking
+        # feed, for a pass that ended before the room walked in. Clear it
+        # again on the way out, so the first thing a stranger sees is a rail
+        # that is honestly idle.
+        print()
+        clear_file(config.pipeline_status_path(), "pipeline status (post-reseed)")
+        clear_file(config.state_directory() / "watcher.json", "watcher state (post-reseed)")
+        return code
 
     forget_rehearsal_memory(meetings_to_forget)
     print("\n[reset] memory kept (the prior standup survived) — pass --reseed to rebuild it")

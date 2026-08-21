@@ -131,7 +131,10 @@
               (result.payload.total === 1 ? " recording" : " recordings");
           }
           if (hoursHost) {
-            hoursHost.textContent = result.payload.hours + " hours";
+            /* The server labels this, so a short library reads "0m" rather
+             * than "0.0 hours". `hours` is still sent for older callers. */
+            hoursHost.textContent = result.payload.total_label ||
+              (result.payload.hours + " hours");
           }
           /* Keep the address bar honest: the URL you are looking at is the URL
            * that reproduces what you are looking at. */
@@ -184,6 +187,15 @@
     var emptyHost = host.querySelector("[data-captions-empty]");
     var captionCount = host.querySelector("[data-caption-count]");
     var diskHost = host.querySelector("[data-disk]");
+    var listeningChip = host.querySelector("[data-listening]");
+    var emptyLine = host.querySelector("[data-captions-empty-line]");
+
+    var micName = host.dataset.micName || "You";
+    var systemName = host.dataset.systemName || "Them";
+
+    var engineHost = host.querySelector("[data-engine]");
+    var engineHeadline = host.querySelector("[data-engine-headline]");
+    var engineDetail = host.querySelector("[data-engine-detail]");
 
     var since = 0;
     var captions = 0;
@@ -196,6 +208,20 @@
      * backlog puts the transport controls off-screen before they have seen
      * them. Only captions that arrive after the page has settled follow. */
     var backfilling = true;
+
+    /* NO STALE CAPTIONS ON AN IDLE ENGINE.
+     *
+     * The engine's caption buffer survives the recording that filled it, and
+     * `since` starting at 0 meant the very first poll backfilled the WHOLE of it
+     * — so opening the Live tab before anyone had spoken showed six lines of the
+     * previous rehearsal's transcript under a transport reading IDLE 00:00. On a
+     * projector that is the demo's own script, garbled, before the demo starts.
+     *
+     * The backfill exists for a page reloaded MID-recording, which is exactly the
+     * recording=true case. When the page opens on an idle engine we still take
+     * the first payload's `seq` — that is how we skip the backlog — and render
+     * nothing from it. */
+    var skipFirstBatch = !recording;
 
     function setBusy(next) {
       busy = next;
@@ -226,6 +252,7 @@
       if (stateHost) {
         stateHost.textContent = recording ? "RECORDING" : "IDLE";
       }
+      applyListening();
 
       var levels = snapshot.levels || {};
       setMeter("mic", levels.mic);
@@ -250,11 +277,80 @@
          * nothing is being captured. */
         schedulePolling();
         if (recording && !wasRecording) {
-          /* A new session's captions start at 0 — including one started from
-           * the native HUD while this page was open. */
-          since = 0;
+          /* A NEW SESSION STARTS FROM AN EMPTY PANE, however it was started.
+           * This used to live in the Start button's handler alone, so a session
+           * begun from the recorder's own HUD reset `since` and left the
+           * previous meeting's rows sitting above the new ones. The transition is
+           * the honest place for it: it fires for the button and the HUD alike. */
+          clearCaptions();
         }
       }
+    }
+
+    /* THE LISTENING STATE, in the two places an eye lands. The transport alone
+     * is not enough from the back of a room: a green RECORDING label over a pane
+     * reading "nothing being said yet" is indistinguishable from a dead
+     * transport, which is the one impression this tab must never give. Driven
+     * from `recording` — the recorder's own answer — so it is equally true for a
+     * session started from this button and one started from the recorder's HUD. */
+    function applyListening() {
+      if (listeningChip) {
+        listeningChip.hidden = !recording;
+      }
+      if (captionsHost) {
+        captionsHost.dataset.listeningState = recording ? "true" : "false";
+      }
+      if (emptyLine) {
+        emptyLine.textContent = recording
+          ? "Listening. Nothing said yet."
+          : "Nothing being said yet.";
+      }
+    }
+
+    function clearCaptions() {
+      since = 0;
+      skipFirstBatch = false;   /* this session's buffer is the one we want */
+      captions = 0;
+      if (!captionsHost) {
+        return;
+      }
+      captionsHost.innerHTML = "";
+      if (captionCount) {
+        captionCount.textContent = "0";
+      }
+      if (emptyHost) {
+        captionsHost.appendChild(emptyHost);
+        emptyHost.hidden = false;
+      }
+      applyListening();
+    }
+
+    /* --- the engine pill --------------------------------------------------- */
+
+    function applyEngine(state) {
+      if (!engineHost || !state) {
+        return;
+      }
+      engineHost.dataset.state = state.state || "down";
+      engineHost.hidden = state.state === "up";
+      if (engineHeadline) {
+        engineHeadline.textContent = state.headline || "";
+      }
+      if (engineDetail) {
+        engineDetail.textContent = state.detail || "";
+      }
+    }
+
+    function pollEngine() {
+      return getJSON("/meetings/api/engine")
+        .then(function (result) {
+          if (result.ok && result.payload) {
+            applyEngine(result.payload.engine);
+          }
+        })
+        .catch(function () {
+          /* The board itself is restarting; the pill keeps what it had. */
+        });
     }
 
     function setMeter(name, value) {
@@ -270,17 +366,26 @@
     }
 
     function pollStatus() {
+      var wasOnline = host.dataset.online === "true";
       return getJSON("/meetings/api/record/status")
         .then(function (result) {
-          if (result.ok && result.payload) {
-            host.dataset.online = "true";
+          var online = !!(result.ok && result.payload);
+          host.dataset.online = online ? "true" : "false";
+          if (online) {
             applyStatus(result.payload);
-          } else {
-            host.dataset.online = "false";
+          }
+          /* The pill only has to be re-read when reachability CHANGED — an
+           * engine that has been up for ten minutes has nothing new to say, and
+           * this poll runs four times a second while recording. */
+          if (online !== wasOnline) {
+            pollEngine();
           }
         })
         .catch(function () {
           host.dataset.online = "false";
+          if (wasOnline) {
+            pollEngine();
+          }
         });
     }
 
@@ -301,8 +406,29 @@
             return;
           }
           var payload = result.payload;
+          /* A SEQUENCE THAT WENT BACKWARDS IS A NEW SESSION, not a glitch. The
+           * engine mints a fresh caption session on every start and its seq
+           * restarts at 1, so a `since` left over from the last meeting (say 6)
+           * asks a three-turn new session for turns after 6 and is answered with
+           * silence — forever. clearCaptions() covers the paths we know about;
+           * this covers the ones we do not, and costs one comparison a second. */
+          if (typeof payload.seq === "number" && payload.seq < since) {
+            /* Drop the pane and go back to `since = 0`; the next tick, a second
+             * away, backfills the new session from its first turn. Returning is
+             * the point — assigning payload.seq here would skip exactly the
+             * turns this branch exists to rescue. */
+            clearCaptions();
+            return;
+          }
           if (typeof payload.seq === "number") {
             since = payload.seq;
+          }
+          if (skipFirstBatch) {
+            /* `since` has just been advanced past the whole buffer; drop the
+             * batch itself. Everything from here on is this session's. */
+            skipFirstBatch = false;
+            backfilling = false;
+            return;
           }
           var turns = payload.turns || [];
           for (var index = 0; index < turns.length; index += 1) {
@@ -348,7 +474,11 @@
 
       var who = document.createElement("h3");
       who.className = "caption-who";
-      who.textContent = turn.who || (turn.track === "mic" ? "You" : "Them");
+      /* The engine's own name for the speaker if it has one; otherwise the
+       * configured name for the track, handed down by the server. Never the
+       * recorder's raw "You"/"Them", which only means anything to the person
+       * holding the microphone. */
+      who.textContent = turn.who || (turn.track === "mic" ? micName : systemName);
 
       var text = document.createElement("p");
       text.className = "caption-text";
@@ -393,23 +523,23 @@
     if (startButton) {
       startButton.addEventListener("click", function () {
         setBusy(true);
+        /* A Record click over a closed engine starts the recorder in the
+         * BACKGROUND and waits up to 30s. The button says only that something
+         * is starting — one short word, so the control keeps its size under the
+         * cursor at the exact moment of the demo's first click. What is starting
+         * and how long it may take is the engine pill's sentence, immediately
+         * below, which has the room to say it. */
         startButton.textContent = "Starting…";
+        if (engineHost && host.dataset.online !== "true") {
+          applyEngine({ state: "launching", headline: "starting the recorder",
+                        detail: "Adjourn is starting the recorder in the background " +
+                                "and waiting for it to answer. Stay on this page." });
+        }
         postJSON("/meetings/api/record/start", {})
           .then(function (result) {
             if (result.ok) {
               showToast("Recording.", "good");
-              since = 0;
-              if (captionsHost) {
-                captionsHost.innerHTML = "";
-                captions = 0;
-                if (captionCount) {
-                  captionCount.textContent = "0";
-                }
-                if (emptyHost) {
-                  captionsHost.appendChild(emptyHost);
-                  emptyHost.hidden = false;
-                }
-              }
+              clearCaptions();
             } else {
               refuse(result);
             }
@@ -421,7 +551,9 @@
             startButton.textContent = "Start recording";
             setBusy(false);
             /* Whatever happened, the recorder is the authority on what is true
-             * now — including when start failed halfway. */
+             * now — including when start failed halfway — and the launch pill has
+             * a new attempt to report either way. */
+            pollEngine();
             return pollStatus();
           });
       });
@@ -454,6 +586,7 @@
     /* --- go ---------------------------------------------------------------- */
 
     applyButtons();
+    applyListening();
     pollStatus();
     pollCaptions();
     schedulePolling();

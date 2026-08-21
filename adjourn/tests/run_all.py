@@ -20,7 +20,9 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 # Ordered cheapest-and-most-foundational first, so the first red line is
 # usually the most informative one.
@@ -93,14 +95,31 @@ def main(argv=None) -> int:
     failures = []
     total = 0.0
     print(f"running {len(suites)} suite(s) with {sys.executable}\n")
-    for module in suites:
-        ok, elapsed, output = run(module, environment)
-        total += elapsed
-        mark = "ok  " if ok else "FAIL"
-        detail = summary_line(output)
-        print(f"  {mark} {module:<34} {elapsed:6.1f}s  {detail}")
-        if not ok:
-            failures.append((module, output))
+    # THE SUITE MUST NOT LEAVE A PIPELINE STATUS FILE IN THE DEMO TREE.
+    #
+    # Executors report their own progress into adjourn/state/pipeline.json, and
+    # the suites that drive executors directly do that for real — so a run of
+    # `tests.run_all` left the file behind holding twenty rows of test internals
+    # ("Would post to #all-test — Sam in the meeting…", and the titles of the
+    # operator's real recordings, read off this machine's library). That file is
+    # what the cold open's THINKING feed renders, so a test run five minutes
+    # before the demo put test fixtures on the projector. DEMO.md's own order
+    # happens to clear it (§1 runs the suite at step 4 and resets at step 6), but
+    # that is luck, not a guarantee.
+    #
+    # One temp path for the whole run: every child resolves
+    # config.pipeline_status_path() to it, the suites that test the file write
+    # and read it exactly as before, and the demo tree is never touched.
+    with tempfile.TemporaryDirectory(prefix="adjourn-tests-") as scratch:
+        environment["ADJOURN_PIPELINE"] = str(Path(scratch) / "pipeline.json")
+        for module in suites:
+            ok, elapsed, output = run(module, environment)
+            total += elapsed
+            mark = "ok  " if ok else "FAIL"
+            detail = summary_line(output)
+            print(f"  {mark} {module:<34} {elapsed:6.1f}s  {detail}")
+            if not ok:
+                failures.append((module, output))
 
     print()
     if failures:

@@ -95,7 +95,16 @@ ROUTING_TABLE: dict[str, tuple[str, ...]] = {
     # guard is a phrase table that answers None for an update that did not move,
     # so the overwhelming majority of updates still produce only the comment.
     "update": ("github_update", "linear_move"),
-    "assignment": ("github_update",),      # ownership moved — before/after comes from memory
+    # linear_move rides on `assignment` too, and it is gated far harder than the
+    # other two. "I'm going to take SHA-7 off your plate, picking that up today"
+    # is the sentence the product promises to understand, and the extractor calls
+    # it an `assignment` about as often as an `update` — so before this route it
+    # produced NOTHING AT ALL: no comment (no issue number) and no move. The gate
+    # is is_self_work_claim(): the speaker has to be claiming the work themselves.
+    # "Priya should take SHA-7" is an assignment too, and moving a ticket into
+    # In Progress because somebody suggested someone else might start it is a lie
+    # on a shared board. See build_linear_move.
+    "assignment": ("github_update", "linear_move"),
     "question": (),                        # inert on purpose: recap and memory only
     "ticket_request": ("linear_create",),  # "we need a ticket for X"
     "progress_report": ("linear_move",),   # a named item that actually moved
@@ -645,12 +654,27 @@ def build_github_update(
             "labels": labels,
             "human_preview": preview,
         },
-        # Meeting + issue + statement kind is a COMPLETE identity, and every part
-        # of it is structural. `topic` used to be in here and is deliberately gone:
-        # it is the one field the extractor is free to rephrase between runs, and
-        # a rephrase would post the same what-changed comment on #2 twice.
+        # MEETING + ISSUE. Nothing else, and the two fields that used to be here
+        # were each removed after they fired a second public comment on the same
+        # issue from the same standup:
+        #
+        #   `topic` — the one field the extractor is free to rephrase between
+        #   runs. A rephrase posted the same what-changed comment on #2 twice.
+        #
+        #   `kind`  — the same sentence carries a different LABEL on a second
+        #   pass. Reproduced from cold memory: pass 1 could not resolve an issue
+        #   for "the ingestion cache work is basically already done" and called it
+        #   a `decision`; pass 1's own memory ingest then taught the store the
+        #   cache-layer -> #2 handle, so pass 2 resolved it, called it an
+        #   `update`, produced a key nothing had ever seen, and commented on #2
+        #   again. Neither the journal nor memory could stop it, because both
+        #   were being asked about the wrong key.
+        #
+        # So the identity of "Adjourn commented on this issue about this meeting"
+        # is the meeting and the issue. One standup leaves at most one comment per
+        # issue, which is also the behaviour a maintainer would ask for.
         dedup_key=build_dedup_key(
-            "github_update", meeting.get("meeting_id", ""), f"issue {issue_number}", kind
+            "github_update", meeting.get("meeting_id", ""), f"issue {issue_number}"
         ),
     )
 
@@ -728,9 +752,13 @@ def build_linear_move(
     if not identifier:
         return None
     # Imported lazily so planner stays importable with no executor dependencies
-    # loaded. choose_target_state / coerce_percent are pure table lookups — the
-    # no-model rule is intact.
-    from .executors.linear_move_executor import choose_target_state, coerce_percent
+    # loaded. choose_target_state / coerce_percent / is_self_work_claim are pure
+    # table lookups — the no-model rule is intact.
+    from .executors.linear_move_executor import (
+        choose_target_state,
+        coerce_percent,
+        is_self_work_claim,
+    )
 
     percent = coerce_percent(_entity_reference(statement, "percent"))
     # SIBLINGS COUNT. One breath — "I'm about four-fifths through, should be in
@@ -749,7 +777,32 @@ def build_linear_move(
         )
         if part
     )
+    # AN ASSIGNMENT ONLY MOVES A TICKET WHEN THE SPEAKER CLAIMED IT. Everything
+    # the extractor labels `assignment` arrives here — "I'm going to take SHA-7
+    # off your plate" and "Priya should take SHA-7" alike — and only the first is
+    # evidence that anything started. The other two routes into this builder
+    # (`update`, `progress_report`) are reports about work, so they need no such
+    # gate; an assignment is a sentence about a PERSON.
+    self_claimed = is_self_work_claim(spoken)
+    if getattr(statement, "kind", "") == "assignment" and not self_claimed:
+        print(
+            f"[planner] declined linear_move: {identifier} was assigned in "
+            f"{_one_line(spoken, 60)!r}, but the speaker did not claim the work"
+        )
+        return None
     target_state = choose_target_state(percent, spoken)
+    if not target_state and self_claimed and getattr(statement, "kind", "") == "assignment":
+        # A self-claim IS a work claim, and it is the one signal the shared
+        # WORK_CLAIM_PHRASES table cannot be widened to hold: "leave it with me"
+        # or "I'll handle it" said in an `update` about somebody else's named
+        # ticket would start moving tickets nobody claimed. Scoped to the
+        # assignment route, where the gate above has already proved the speaker
+        # is talking about their own hands, it is exactly right. The executor
+        # still re-reads the real column and is_backward_move() still refuses to
+        # drag anything back down the board.
+        from .executors.linear_move_executor import STATE_IN_PROGRESS
+
+        target_state = STATE_IN_PROGRESS
     if not target_state:
         # A silent no-op here used to be invisible: the room named a ticket, the
         # extractor got it right, and nothing appeared on the board or in the log

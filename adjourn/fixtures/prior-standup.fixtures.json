@@ -2,7 +2,7 @@
   "_comment": "Ground truth for prior-standup.jsonl, hand-written. This is the meeting the demo meeting contradicts: Redis / Sam / the twenty-second on issue #2. Loaded verbatim by extraction.load_fixture_statements('prior-standup'), and used to seed memory before the demo so the conflict judge has a history to judge against.",
   "meeting": {
     "meeting_id": "prior-standup",
-    "title": "MMM Standup",
+    "title": "Adjourn standup — 14 Aug",
     "date": "2026-08-14"
   },
   "statements": [

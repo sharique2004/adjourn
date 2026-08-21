@@ -15,7 +15,7 @@
 
   var POLL_INTERVAL_MS = 1000;
   var RING_INTERVAL_MS = 250;
-  var RING_CIRCUMFERENCE = 131.95; /* 2 * pi * r, r = 21 — matches board.css */
+  var RING_CIRCUMFERENCE = 157.08; /* 2 * pi * r, r = 25 — matches board.html */
 
   var body = document.body;
   var view = body.dataset.view || "board";
@@ -40,6 +40,73 @@
   var knownCardKeys = collectCardKeys();
   var toastTimer = null;
 
+  /* --- the rail's live region ---------------------------------------------
+   *
+   * Two jobs, and both exist because the rail is re-rendered wholesale every
+   * second: (1) animate ONLY the rows that are actually new, so a poll that
+   * changed nothing does not re-run twenty entrance animations at once, and
+   * (2) keep the region pinned to the newest row — but stop following the
+   * moment the viewer scrolls up to read something, which is the same courtesy
+   * the live captions pane extends.
+   */
+
+  var knownFeedSeqs = Object.create(null);
+  var feedPinnedToBottom = true;
+  var feedSeqCeiling = 0;
+
+  function feedElement() {
+    return document.querySelector("[data-rail-feed]");
+  }
+
+  function rememberFeedRows(animate) {
+    var rows = document.querySelectorAll(".rail-row[data-seq]");
+    var highest = 0;
+    for (var index = 0; index < rows.length; index += 1) {
+      var row = rows[index];
+      var seq = parseInt(row.dataset.seq, 10);
+      if (isNaN(seq)) {
+        continue;
+      }
+      if (seq > highest) {
+        highest = seq;
+      }
+      if (animate && !knownFeedSeqs[seq]) {
+        row.classList.add("is-new");
+      }
+      knownFeedSeqs[seq] = true;
+    }
+    /* A run that restarts resets seq to 1 (see the feed spec). A ceiling that
+     * moved BACKWARDS is that restart, so forget the old run rather than
+     * silently refusing to animate the new one's first eighty rows. */
+    if (highest < feedSeqCeiling) {
+      knownFeedSeqs = Object.create(null);
+      for (var j = 0; j < rows.length; j += 1) {
+        knownFeedSeqs[rows[j].dataset.seq] = true;
+      }
+    }
+    feedSeqCeiling = highest;
+  }
+
+  function watchFeedScroll() {
+    var feed = feedElement();
+    if (!feed || feed.dataset.scrollBound === "1") {
+      return;
+    }
+    feed.dataset.scrollBound = "1";
+    feed.addEventListener("scroll", function () {
+      var slack = 24;
+      feedPinnedToBottom =
+        feed.scrollTop + feed.clientHeight >= feed.scrollHeight - slack;
+    });
+  }
+
+  function followFeed() {
+    var feed = feedElement();
+    if (feed && feedPinnedToBottom) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
   /* --- card entrance ----------------------------------------------------- */
 
   function collectCardKeys() {
@@ -51,15 +118,32 @@
     return keys;
   }
 
+  /* The gap between one arriving card and the next. Short enough that a replay
+   * landing five at once still finishes in under half a second, long enough
+   * that they read as five things rather than one block appearing. Capped, so a
+   * meeting that fires eleven actions does not end with a card waiting half a
+   * second to show up. */
+  var CARD_STAGGER_MS = 45;
+  var CARD_STAGGER_CAP_MS = 270;
+
   function markNewCards() {
     var cards = document.querySelectorAll(".card[data-key]");
     var nextKeys = Object.create(null);
+    /* Counted across the NEW cards only. Using the card's position in the column
+     * would make a single late arrival wait behind every card already above it,
+     * which is a delay with nothing behind it. */
+    var arriving = 0;
     for (var index = 0; index < cards.length; index += 1) {
       var card = cards[index];
       var key = card.dataset.key;
       nextKeys[key] = true;
       if (!knownCardKeys[key]) {
+        card.style.setProperty(
+          "--enter-delay",
+          Math.min(arriving * CARD_STAGGER_MS, CARD_STAGGER_CAP_MS) + "ms"
+        );
         card.classList.add("is-entering");
+        arriving += 1;
       }
     }
     knownCardKeys = nextKeys;
@@ -112,19 +196,10 @@
       cardsHost.innerHTML = fragment.cards_html || "";
     }
     if (gutsHost && Object.prototype.hasOwnProperty.call(fragment, "guts_html")) {
-      /* The pipeline panel is a <details>, collapsed by default so the pinned
-       * cards clear the fold. If a viewer opened it, the 1s swap must not close
-       * it under their hand — carry the open state across the replacement. */
-      var wasOpen = false;
-      var previous = gutsHost.querySelector("[data-guts-details]");
-      if (previous) {
-        wasOpen = previous.open;
-      }
       gutsHost.innerHTML = fragment.guts_html || "";
-      var replacement = gutsHost.querySelector("[data-guts-details]");
-      if (replacement && wasOpen) {
-        replacement.open = true;
-      }
+      rememberFeedRows(true);
+      watchFeedScroll();
+      followFeed();
     }
     currentVersion = fragment.version || currentVersion;
     body.dataset.version = currentVersion;
@@ -213,6 +288,11 @@
 
   markNewCards();
   tickCountdownRings();
+  /* The server-rendered rows are the starting state, not an arrival: remember
+   * them WITHOUT animating, so opening the page does not play eighty entrances. */
+  rememberFeedRows(false);
+  watchFeedScroll();
+  followFeed();
 
   if (pollsForFragments) {
     window.setInterval(pollOnce, POLL_INTERVAL_MS);

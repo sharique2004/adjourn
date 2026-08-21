@@ -404,10 +404,13 @@ def test_speaker_display_name() -> None:
     print("\n== speaker: a track label is not a person's name ==")
     check("'You' becomes the configured name", extraction.speaker_display_name("You") == "Sharique")
     check("case does not matter", extraction.speaker_display_name("you") == "Sharique")
+    # "Guest" — a role, not an invented name. The old default was "A teammate";
+    # ADJOURN_GUEST_NAME is the setting now and ADJOURN_OTHER_SPEAKER_NAME is
+    # still honoured behind it, so a runbook naming the old one keeps working.
     check("'Them' becomes a readable description, not a name",
-          extraction.speaker_display_name("Them") == "A teammate")
+          extraction.speaker_display_name("Them") == "Guest")
     check("...and so does the raw system-track label",
-          extraction.speaker_display_name("system") == "A teammate")
+          extraction.speaker_display_name("system") == "Guest")
     check("a diarized name is left alone", extraction.speaker_display_name("Priya") == "Priya")
     check("an empty label stays empty", extraction.speaker_display_name("") == "")
 
@@ -415,7 +418,7 @@ def test_speaker_display_name() -> None:
     extraction.apply_speaker_display_names(statements)
     check("the pass rewrites the mic track", statements[0].speaker == "Sharique")
     check("...and the system track too, so no card says 'Them will email Div'",
-          statements[1].speaker == "A teammate")
+          statements[1].speaker == "Guest")
 
     # End to end: the label is rewritten ONCE, in extraction's post-processing,
     # and the planner copies whatever it finds — which is how the Slack body, the

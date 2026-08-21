@@ -14,7 +14,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% if meeting.meeting.title %}{{ meeting.meeting.title }} · Follow-through{% else %}Follow-through · Adjourn{% endif %}</title>
+  <title>{% if meeting.meeting.display_title %}{{ meeting.meeting.display_title }} · Follow-through{% else %}Follow-through · Adjourn{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
 </head>
 <body data-view="meeting" data-undo-token="{{ undo_token }}">
@@ -22,11 +22,14 @@
 <header class="masthead" data-header>
   <div class="masthead-inner">
     <div class="masthead-left">
-      <h1 class="meeting-title">{{ meeting.meeting.title or meeting.meeting.meeting_id or 'Meeting' }}</h1>
+      <h1 class="meeting-title">{{ meeting.meeting.display_title or meeting.meeting.title or 'Meeting' }}</h1>
       <p class="meeting-meta">
         {% if meeting.meeting.duration %}<span class="meta-item">{{ meeting.meeting.duration }}</span>{% endif %}
         <span class="meta-item totals">{{ meeting.totals_line }}</span>
-        {% if meeting.meeting.meeting_id %}<span class="meta-item mode-note">{{ meeting.meeting.meeting_id }}</span>{% endif %}
+        {# The slug still appears, because on THIS page it is the answer to
+           "which meeting is this?" — but as the small monospace identifier it
+           is, not as the headline. #}
+        {% if meeting.meeting.meeting_id %}<span class="meta-item"><span class="external-id">{{ meeting.meeting.meeting_id }}</span></span>{% endif %}
       </p>
     </div>
     <p class="tagline">What this meeting caused.</p>
@@ -59,12 +62,20 @@
     {% for card in meeting.cards %}{{ action_card(card) }}{% endfor %}
   </section>
   {% else %}
+  {# A MEETING THAT CAUSED NOTHING IS A RESULT, AND IT IS ALSO A DEAD END if the
+     only way onward is a small link three inches above. Whoever arrives here
+     arrived by clicking the biggest control on the meeting's page, so the way
+     back to a board with receipts on it is a control of the same weight. #}
   <section class="empty-state" aria-label="No actions for this meeting">
     <span class="empty-pulse" aria-hidden="true"></span>
     <p class="empty-line">
       Nothing followed from this meeting. That is a result, not a gap — most talk
       should produce nothing at all.
     </p>
+    <a class="empty-onward" href="/">
+      <span class="empty-onward-copy">See what every meeting caused</span>
+      <span class="empty-onward-arrow" aria-hidden="true">&rarr;</span>
+    </a>
   </section>
   {% endif %}
 </main>
@@ -74,7 +85,9 @@
 <footer class="footfall">
   <span>Adjourn</span>
   <span class="dot-sep">·</span>
-  <span>read at {{ meeting.generated_at }}</span>
+  <span>read at {{ meeting.generated_clock }}</span>
+  <span class="dot-sep">·</span>
+  <span class="footfall-privacy">{{ privacy_line }}</span>
 </footer>
 
 <script src="{{ url_for('static', filename='board.js') }}" defer></script>

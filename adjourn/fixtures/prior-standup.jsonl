@@ -1,4 +1,4 @@
-{"type":"meta","meeting_id":"prior-standup","title":"MMM Standup","date":"2026-08-14"}
+{"type":"meta","meeting_id":"prior-standup","title":"Adjourn standup — 14 Aug","date":"2026-08-14"}
 {"type":"segment","segment_id":"prior-s01","speaker":"Them","track":"system","start":0.0,"end":4.2,"text":"Are we recording? Okay. Quick one, I've got a hard stop at ten."}
 {"type":"segment","segment_id":"prior-s02","speaker":"You","track":"mic","start":4.5,"end":8.1,"text":"Recording. Three things and we're out."}
 {"type":"segment","segment_id":"prior-s03","speaker":"Them","track":"system","start":8.4,"end":22.7,"text":"Caching first. I went through the numbers on issue two and Redis is the right call — we already run it for the queue, so it's not a new thing to operate."}

@@ -701,6 +701,77 @@ with tempfile.TemporaryDirectory() as directory:
         orchestrator.open_memory_safely = original_memory
 
 
+print("\n== orchestrator: the narrated feed (the rail that must MOVE) ==")
+with tempfile.TemporaryDirectory() as directory:
+    pipe = Path(directory) / "pipeline.json"
+    original_pipeline = config.pipeline_status_path
+    config.pipeline_status_path = lambda: pipe  # noqa: E731
+    try:
+        # batch_index/batch_total survive the round trip. Without these two the
+        # board renders no progress bar and the brief's "rail must move, not
+        # freeze idle" is unprovable.
+        orchestrator.report_pipeline(
+            meeting_id="m-1",
+            extraction=orchestrator.ExtractionStatus(
+                phase=orchestrator.STAGE_RUNNING, batch_index=2, batch_total=5,
+            ),
+            feed_reset=True,
+        )
+        reread = orchestrator.read_pipeline_status()
+        check("batch_index survives to_dict/from_dict", reread.extraction.batch_index == 2)
+        check("batch_total survives to_dict/from_dict", reread.extraction.batch_total == 5)
+        check("batch counters reach the raw JSON the board reads",
+              json.loads(pipe.read_text())["extraction"]["batch_total"] == 5)
+
+        orchestrator.report_pipeline_event(
+            stage="extraction", tone="act", label="DECISION", text="the green is wrong",
+        )
+        rows = orchestrator.read_pipeline_status().feed
+        check("an event lands on the feed", len(rows) == 1, str(rows))
+        check("seq starts at 1 after a reset", rows[0]["seq"] == 1)
+        check("the label is lowercased for the chip", rows[0]["label"] == "decision")
+        check("the row carries stage and tone", rows[0]["stage"] == "extraction"
+              and rows[0]["tone"] == "act")
+
+        # The writer owns the shape; the board only truncates for display.
+        orchestrator.report_pipeline_event(stage="planner", text="x" * 400)
+        long_row = orchestrator.read_pipeline_status().feed[-1]
+        check("text is capped at 140 chars by the WRITER",
+              len(long_row["text"]) <= orchestrator.FEED_TEXT_LIMIT, str(len(long_row["text"])))
+
+        # A junk stage must not reach a page on a projector.
+        before = len(orchestrator.read_pipeline_status().feed)
+        orchestrator.report_pipeline_event(stage="not-a-stage", text="should be dropped")
+        check("an unknown stage is dropped, not rendered",
+              len(orchestrator.read_pipeline_status().feed) == before)
+        orchestrator.report_pipeline_event(stage="executor", tone="nonsense", text="coerced")
+        check("an unknown tone falls back to note",
+              orchestrator.read_pipeline_status().feed[-1]["tone"] == "note")
+
+        for index in range(120):
+            orchestrator.report_pipeline_event(stage="planner", text=f"row {index}")
+        capped = orchestrator.read_pipeline_status().feed
+        check("the feed is capped at 80 rows", len(capped) == orchestrator.FEED_LIMIT,
+              str(len(capped)))
+        check("newest is LAST (the board scrolls to the bottom)",
+              capped[-1]["text"] == "row 119", capped[-1]["text"])
+        check("seq never goes backwards inside a run",
+              all(b["seq"] > a["seq"] for a, b in zip(capped, capped[1:], strict=False)))
+
+        # A new run must not open on the previous meeting's thinking.
+        check("a different meeting is detected as a new run",
+              orchestrator.feed_belongs_to_a_new_run("m-2") is True)
+        check("the same meeting is NOT a new run (one meeting narrates twice: fast + final)",
+              orchestrator.feed_belongs_to_a_new_run("m-1") is False)
+        orchestrator.report_pipeline(meeting_id="m-2", feed_reset=True)
+        check("feed_reset clears the rail", orchestrator.read_pipeline_status().feed == [])
+        orchestrator.report_pipeline_event(stage="watcher", text="a new run begins")
+        check("...and seq restarts at 1 so the board knows it is a new run",
+              orchestrator.read_pipeline_status().feed[0]["seq"] == 1)
+    finally:
+        config.pipeline_status_path = original_pipeline
+
+
 print(f"\n{'=' * 60}")
 print(f"Lane A: {PASSED} passed, {FAILED} failed")
 print("=" * 60)

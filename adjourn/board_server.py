@@ -55,6 +55,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets as secrets_module
 import threading
 import time
@@ -124,6 +125,157 @@ LINK_LABELS: dict[str, str] = {
 
 QUIET_HEADER_LINE = "The meeting is the to-do."
 EMPTY_STATE_LINE = "Adjourned. Waiting for the next meeting."
+
+# TRACING A QUOTE BACK TO WHAT WAS SAID. Every card carries the words that caused
+# it; the demo beat is that those words are not decoration — you click them and
+# land on the transcript line they came out of. The transcript lives on the
+# Meetings blueprint (/meetings/<meeting_id>), so a card can only offer the link
+# when that blueprint actually mounted. create_board_application sets this; the
+# default is True because build_card is also called by tests and by the archive
+# reader, neither of which builds an app.
+MEETINGS_TAB_MOUNTED = True
+
+
+def display_path(path: Path | str) -> str:
+    """A filesystem path as a human reads it: '~/…' rather than '/Users/<name>/…'.
+
+    The Connections tab is the honest-preflight page, so it names the real files
+    Adjourn reads and writes — but a projected absolute path leads with the
+    operator's account name and eats the row. Collapsing $HOME shortens it
+    without changing which file it points at.
+    """
+    text = str(path)
+    home = str(Path.home())
+    if home and text.startswith(home):
+        return "~" + text[len(home) :]
+    return text
+
+
+def display_journal_path(path: Path | str) -> str:
+    """The journal, named on Connections without printing a filesystem path.
+
+    NO PATHS ON A PROJECTOR. Connections must say truthfully what is written and
+    where it stays, and it does — the file has a name, and "local" is the whole
+    claim being made about it. What it no longer prints is a directory: an
+    absolute path leads with the operator's account name, eats the row from 1.5m,
+    and on the engine's own dot-directory it is also the one place on 5117 where
+    a careful reader learns a second product exists.
+
+    A journal moved elsewhere (EXECUTIONS_JOURNAL) reads the same way. The point
+    of the row is "one line per action, on this Mac", and that is what it says.
+    """
+    return f"{Path(str(path)).name} · local"
+
+
+def display_directory_label(path: Path | str) -> str:
+    """A directory Adjourn writes into: its own name plus 'local'. No path."""
+    name = Path(str(path)).name or "local"
+    return f"{name}/ · local"
+
+
+# Words that are shouted rather than spelled. Anything not in here is written the
+# way a person writes it in a sentence — lower case unless it starts the title.
+_MEETING_ID_ACRONYMS = frozenset({
+    "agi", "pr", "prs", "ai", "api", "ui", "ux", "sha", "cli", "llm", "qa", "kpi",
+})
+
+
+def humanize_meeting_id(meeting_id: str) -> str:
+    """'agi-living-room' -> 'AGI living room'. A title when there is no title.
+
+    A SLUG IS AN ADDRESS, NOT A NAME. It is right in a URL, in the journal and in
+    the small monospace `external-id` chip at the foot of a card — all places a
+    reader understands they are looking at an identifier. It is wrong as the
+    28px headline of the opening frame, which is where it was landing whenever a
+    recording folder had no title on it: the first thing in the room read like a
+    filename. This is the fallback for that one job, and only that one.
+
+    Returns "" for an empty id so callers can keep their own last-resort phrase.
+    """
+    words = [word for word in re.split(r"[-_\s]+", str(meeting_id or "")) if word]
+    # A trailing capture stamp ("…-20260821", "…-041329") is machine bookkeeping
+    # and never part of what the meeting was called.
+    while words and words[-1].isdigit() and len(words[-1]) >= 6:
+        words.pop()
+    if not words:
+        return ""
+    spoken = [
+        word.upper() if word.lower() in _MEETING_ID_ACRONYMS else word.lower()
+        for word in words
+    ]
+    if spoken[0].lower() not in _MEETING_ID_ACRONYMS:
+        spoken[0] = spoken[0][:1].upper() + spoken[0][1:]
+    return " ".join(spoken)
+
+
+# A CARD LINKS TO A TRANSCRIPT ONLY IF THERE IS ONE. The default `--replay` tape
+# is a FIXTURE (agi-living-room): it produces real cards with real quotes, but no
+# recording was ever made, so /meetings/agi-living-room is a 404. Linking anyway
+# would put a dead door under the quote on the demo's own default path. So the
+# board asks the library first — cheaply, because the answer is cached: a hit is
+# permanent (a recording does not un-record), a miss expires in seconds so that a
+# meeting recorded live on stage starts linking as soon as its folder lands.
+_TRANSCRIPT_PRESENT: dict[str, bool] = {}
+_TRANSCRIPT_MISSES: dict[str, float] = {}
+TRANSCRIPT_MISS_TTL_SECONDS = 5.0
+
+
+def meeting_has_transcript(meeting_id: str) -> bool:
+    """Is there a readable recording behind this meeting id? Never raises."""
+    meeting_id = (meeting_id or "").strip()
+    if not meeting_id:
+        return False
+    if _TRANSCRIPT_PRESENT.get(meeting_id):
+        return True
+    missed_at = _TRANSCRIPT_MISSES.get(meeting_id)
+    if missed_at is not None and (time.monotonic() - missed_at) < TRANSCRIPT_MISS_TTL_SECONDS:
+        return False
+    try:
+        # TRUTHY, not `is not None`. meetingscribe_source.read_meeting_json answers
+        # an EMPTY DICT for an id it does not hold, which is a dict and therefore
+        # passed an `is not None` test — that is exactly how the fixture tape
+        # (agi-living-room) got a link to a page that 404s. An empty document is
+        # not a transcript.
+        found = bool(_read_meeting_document(meeting_id))
+    except Exception:  # noqa: BLE001 — an unreadable library is "no link", not a 500
+        found = False
+    if found:
+        _TRANSCRIPT_PRESENT[meeting_id] = True
+        _TRANSCRIPT_MISSES.pop(meeting_id, None)
+    else:
+        _TRANSCRIPT_MISSES[meeting_id] = time.monotonic()
+    return found
+
+
+def card_transcript_url(meeting_id: str) -> str:
+    """Where a card's quote traces back to. Empty when there is nowhere to go."""
+    meeting_id = (meeting_id or "").strip()
+    if not meeting_id or not MEETINGS_TAB_MOUNTED:
+        return ""
+    if not meeting_has_transcript(meeting_id):
+        return ""
+    return f"/meetings/{meeting_id}"
+
+# THE SETTLED PRIVACY CLAIM. One string, used everywhere the board makes the
+# local-first argument, because the older absolute wording ("nothing ever leaves
+# this machine") is falsified by the model calls and by the cloud mirror the
+# Connections tab itself lists. This sentence is true with the mirror on and true
+# with it off.
+PRIVACY_LINE = (
+    "audio and transcripts never leave the Mac — "
+    "only the receipts you see on this board are mirrored"
+)
+
+# --- the live rail ----------------------------------------------------------
+#
+# How many rows of thinking the rail holds. The orchestrator caps its own feed at
+# 80 (see scratchpad/pipeline-feed-spec.md); this is the board's own ceiling for
+# the DERIVED feed, and the trim applied to whatever the orchestrator sent.
+FEED_MAX_ROWS = 80
+
+# Longest text a rail row renders. The rail is read from across a room on a
+# projector; anything longer is a paragraph pretending to be a log line.
+FEED_TEXT_LIMIT = 140
 
 
 # --- path resolution --------------------------------------------------------
@@ -260,6 +412,7 @@ def build_card(record: dict, index: int, undone_keys: set[str], now: datetime) -
     card["carries_conflict"] = record_carries_conflict(record)
     card["pinned"] = card_shows_a_transition(card)
     card["url"] = board_recap_url(card)
+    card["transcript_url"] = card_transcript_url(card["meeting_id"])
     return card
 
 
@@ -300,6 +453,7 @@ def build_cancellation_card(record: dict, index: int, now: datetime) -> dict:
         "carries_conflict": False,
         "pinned": False,
         "state": "cancelled",
+        "transcript_url": card_transcript_url(record.get("meeting_id") or ""),
     }
 
 
@@ -403,6 +557,7 @@ def build_pending_item(item: orchestrator.PendingAction, now: datetime) -> dict:
         "seconds_remaining": int(remaining),
         "fraction_remaining": max(0.0, min(1.0, remaining / window)) if window else 0.0,
         "status": item.status,
+        "transcript_url": card_transcript_url(item.meeting_id or ""),
     }
 
 
@@ -414,13 +569,31 @@ def read_meeting_header(meeting_id: str) -> dict:
     " — <id>", because the folder renames itself when the title changes. Never
     raises: an unknown meeting simply renders without a title.
     """
-    header = {"meeting_id": meeting_id, "title": "", "duration": "", "created": ""}
+    # `title` stays exactly what the recording says it is — callers branch on it
+    # being empty. `display_title` is the one a masthead prints: never blank,
+    # never a slug. See humanize_meeting_id.
+    header = {
+        "meeting_id": meeting_id,
+        "title": "",
+        "display_title": humanize_meeting_id(meeting_id),
+        "duration": "",
+        "created": "",
+    }
     if not meeting_id:
         return header
-    document = _read_meeting_document(meeting_id)
+    # "Never raises" was the docstring's claim and not the code's behaviour: the
+    # library read reaches the engine and the filesystem, and either can throw.
+    # Every page on this server calls through here, so one unreadable recordings
+    # folder used to be a 500 on the whole board — a missing TITLE is the correct
+    # cost of that, not a missing app.
+    try:
+        document = _read_meeting_document(meeting_id)
+    except Exception:  # noqa: BLE001
+        return header
     if not document:
         return header
     header["title"] = str(document.get("title") or "")
+    header["display_title"] = header["title"] or header["display_title"]
     header["duration"] = format_duration(document.get("duration"))
     header["created"] = str(document.get("created") or "")
     return header
@@ -440,11 +613,23 @@ def _read_meeting_document(meeting_id: str) -> dict | None:
         from . import meetingscribe_source
 
         document = meetingscribe_source.read_meeting_json(meeting_id)
-        if isinstance(document, dict):
+        if isinstance(document, dict) and document:
             return document
     except (NotImplementedError, AttributeError, ImportError, OSError, ValueError):
         pass
-    return _read_meeting_document_from_disk(meeting_id)
+    from_disk = _read_meeting_document_from_disk(meeting_id)
+    if from_disk:
+        return from_disk
+    # LAST, AND ONLY LAST: a fixture tape. A replayed meeting has a real
+    # transcript and a real title but no recording, so this is what lets
+    # `meeting_has_transcript` answer truthfully for `--replay` (the quote on a
+    # card gets somewhere to go) and what stops `read_meeting_header` falling
+    # back to printing the raw internal slug as the meeting's name on the cold
+    # open. A real recording always wins: this is reached only when neither the
+    # engine nor the recordings folder holds the id.
+    from . import fixture_library
+
+    return fixture_library.fixture_meeting_document(meeting_id) or from_disk
 
 
 def _read_meeting_document_from_disk(meeting_id: str) -> dict | None:
@@ -619,16 +804,198 @@ def executors_pipeline_view(totals: dict, pending_count: int) -> dict:
     }
 
 
-def load_pipeline_status(totals: dict | None = None, pending_count: int = 0) -> dict:
+def _clip(text: str, limit: int = FEED_TEXT_LIMIT) -> str:
+    """One rail row's worth of text. Never a paragraph, never a hard cut mid-word."""
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def normalize_feed_rows(raw_feed) -> list[dict]:
+    """The orchestrator's own feed, shape-guarded. Junk rows are dropped, not fatal.
+
+    The contract is scratchpad/pipeline-feed-spec.md. Everything here is defensive
+    because pipeline.json is written by another process on a 1s read cadence: a
+    half-written array, a row that is a string, a seq that is a float — none of
+    those may take the board down mid-demo.
+    """
+    rows: list[dict] = []
+    if not isinstance(raw_feed, list):
+        return rows
+    for index, item in enumerate(raw_feed):
+        if not isinstance(item, dict):
+            continue
+        text = _clip(item.get("text") or "")
+        label = _clip(str(item.get("label") or ""), 24)
+        if not text and not label:
+            continue
+        try:
+            seq = int(item.get("seq") or (index + 1))
+        except (TypeError, ValueError):
+            seq = index + 1
+        rows.append(
+            {
+                "seq": seq,
+                "at": str(item.get("at") or ""),
+                "stage": str(item.get("stage") or "planner"),
+                "tone": str(item.get("tone") or "note"),
+                "label": label,
+                "text": text,
+                "derived": False,
+            }
+        )
+    return rows[-FEED_MAX_ROWS:]
+
+
+def derive_feed_rows(
+    raw: dict, cards: list[dict], pending: list[dict]
+) -> list[dict]:
+    """The rail's fallback feed, composed from files the board already reads.
+
+    This exists so the rail animates TONIGHT, whether or not the orchestrator has
+    implemented the per-statement feed. It is strictly coarser — a derived row can
+    say "3 decisions landed" but not quote the first words of one, because the
+    statements themselves are never written anywhere the board can see. What it
+    can do honestly is grow as the run advances: the watcher row appears, then the
+    extraction kinds, then the planner's routes and refusals, then one row per
+    action as it fires. That is a real feed, not a spinner.
+
+    Ordering is deterministic (stage order, then count desc, then name) so a poll
+    that changes nothing produces the same rows and compute_version stays quiet.
+    """
+    watcher = raw.get("watcher") or {}
+    extraction = raw.get("extraction") or {}
+    plan = raw.get("planner") or {}
+    rows: list[dict] = []
+
+    def add(stage: str, tone: str, label: str, text: str) -> None:
+        rows.append(
+            {
+                "seq": len(rows) + 1,
+                "at": "",
+                "stage": stage,
+                "tone": tone,
+                "label": _clip(label, 24),
+                "text": _clip(text),
+                "derived": True,
+            }
+        )
+
+    phase = str(watcher.get("phase") or orchestrator.WATCHER_WAITING)
+    if phase != orchestrator.WATCHER_WAITING:
+        add("watcher", "note", phase.replace("_", " "),
+            str(watcher.get("detail") or "") or "the watcher saw a meeting end")
+
+    # THE SAME PHRASE THE RAIL'S OWN LABEL USES, and for the same reason: there
+    # is no zeroth batch, so the moment before the first one lands says what is
+    # happening rather than printing "batch 0/5". See _batch_line.
+    if int(extraction.get("batch_total") or 0):
+        add("extraction", "note", "batch", _batch_line(extraction))
+
+    for kind, count in _sorted_counts(extraction.get("kinds")):
+        add("extraction", "act", kind,
+            f"{count} landed" if count != 1 else "1 landed")
+
+    silent = int(extraction.get("silent_count") or 0)
+    if silent:
+        add("extraction", "ignore", "silent",
+            f"{silent} line{'s' if silent != 1 else ''} produced nothing")
+
+    for kind, count in _sorted_counts(plan.get("ignored_kinds")):
+        add("planner", "ignore", kind, f"{kind} → ignored")
+
+    for kind, count in _sorted_counts(plan.get("action_kinds")):
+        add("planner", "act", kind,
+            f"routed → {kind}" + (f" ×{count}" if count != 1 else ""))
+
+    for item in pending:
+        add("executor", "hold", item.get("kind") or "action",
+            f"holding · {item.get('human_preview') or ''}")
+
+    for card in cards[-14:]:
+        tone = "act"
+        if card.get("state") in {"failed", "cancelled"} or not card.get("ok", True):
+            tone = "decline"
+        elif card.get("undone"):
+            tone = "ignore"
+        mode = card.get("mode") or ""
+        add("executor", tone, card.get("kind") or "action",
+            f"{card.get('human_summary') or ''}" + (f" · {mode}" if mode else ""))
+
+    return rows[-FEED_MAX_ROWS:]
+
+
+def _sorted_counts(counts) -> list[tuple[str, int]]:
+    """{kind: n} → [(kind, n)] most first, name-stable. Junk in, empty out."""
+    if not isinstance(counts, dict):
+        return []
+    clean: list[tuple[str, int]] = []
+    for key, value in counts.items():
+        try:
+            clean.append((str(key), int(value)))
+        except (TypeError, ValueError):
+            continue
+    clean.sort(key=lambda pair: (-pair[1], pair[0]))
+    return clean
+
+
+ADDITIVE_EXTRACTION_KEYS = ("batch_index", "batch_total")
+
+
+def _overlay_additive_pipeline_fields(raw: dict) -> None:
+    """Copy `feed` and the batch counters off pipeline.json into `raw`, in place.
+
+    Never raises: a missing file, a half-written file, or a document that is not a
+    dict all leave `raw` exactly as the dataclass produced it.
+    """
+    try:
+        document = json.loads(pipeline_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return
+    if not isinstance(document, dict):
+        return
+    if isinstance(document.get("feed"), list):
+        raw["feed"] = document["feed"]
+    source = document.get("extraction")
+    if isinstance(source, dict):
+        target = raw.setdefault("extraction", {})
+        if isinstance(target, dict):
+            for key in ADDITIVE_EXTRACTION_KEYS:
+                if key in source:
+                    target[key] = source[key]
+
+
+def load_pipeline_status(
+    totals: dict | None = None,
+    pending_count: int = 0,
+    cards: list[dict] | None = None,
+    pending: list[dict] | None = None,
+) -> dict:
     """Shape pipeline.json + executor totals for the guts panel. Never raises."""
     try:
         raw = orchestrator.read_pipeline_status(path=pipeline_path()).to_dict()
     except Exception:  # noqa: BLE001 — a missing or half-written file is idle, not an error page
         raw = orchestrator.PipelineStatus().to_dict()
+    # ADDITIVE FIELDS COME OFF THE RAW DOCUMENT, NOT THE DATACLASS. PipelineStatus
+    # is the orchestrator's schema and it drops keys it does not declare, so
+    # routing `feed` and the batch counters through it would mean the board could
+    # not read them until orchestrator.py changed. Reading the JSON directly makes
+    # the two halves of the contract independent: Lane B writes the field, the
+    # board renders it, and neither has to land first.
+    _overlay_additive_pipeline_fields(raw)
     watcher = raw.get("watcher") or {}
     extraction = raw.get("extraction") or {}
     planner = raw.get("planner") or {}
     executors = executors_pipeline_view(totals or {}, pending_count)
+
+    # THE ORCHESTRATOR'S OWN FEED ALWAYS WINS. It is the only source that can name
+    # a statement's first words; the derived one is a floor, not a competitor.
+    feed = normalize_feed_rows(raw.get("feed"))
+    feed_source = "orchestrator"
+    if not feed:
+        feed = derive_feed_rows(raw, cards or [], pending or [])
+        feed_source = "derived"
     return {
         "updated_at": raw.get("updated_at") or "",
         "mode": raw.get("mode") or "idle",
@@ -644,6 +1011,14 @@ def load_pipeline_status(totals: dict | None = None, pending_count: int = 0) -> 
         "extraction": {
             "phase": extraction.get("phase") or orchestrator.STAGE_IDLE,
             "statement_count": int(extraction.get("statement_count") or 0),
+            "segment_count": int(extraction.get("segment_count") or 0),
+            "silent_count": int(extraction.get("silent_count") or 0),
+            # Batch progress. Absent (0/0) until the orchestrator implements the
+            # feed spec; the rail renders no bar rather than a fake one.
+            "batch_index": int(extraction.get("batch_index") or 0),
+            "batch_total": int(extraction.get("batch_total") or 0),
+            "batch_line": _batch_line(extraction),
+            "batch_fraction": _batch_fraction(extraction),
             "kinds": extraction.get("kinds") or {},
             "source": extraction.get("source") or "",
             "detail": extraction.get("detail") or "idle",
@@ -662,7 +1037,39 @@ def load_pipeline_status(totals: dict | None = None, pending_count: int = 0) -> 
             **executors,
             "headline": _executors_headline(executors),
         },
+        "feed": feed,
+        "feed_source": feed_source,
+        "feed_seq": max((row["seq"] for row in feed), default=0),
+        "feed_count": len(feed),
     }
+
+
+def _batch_line(extraction: dict) -> str:
+    """'batch 2/4' while the extractor is chewing; '' when there is no batching.
+
+    INDEX 0 IS A PHRASE, NOT A COUNT. The writer publishes 0/N deliberately, so
+    the bar exists during the longest wait rather than appearing late — that is
+    right and stays. But "batch 0/5" is odd English on a label a room stares at
+    for the ~8 seconds before batch 1 lands, so the zero state says what is
+    actually happening. _batch_fraction still returns 0.0, so the bar renders
+    empty underneath it exactly as before.
+    """
+    total = int(extraction.get("batch_total") or 0)
+    if total <= 0:
+        return ""
+    index = max(0, min(total, int(extraction.get("batch_index") or 0)))
+    if index == 0:
+        return f"reading {total} batch{'' if total == 1 else 'es'}"
+    return f"batch {index}/{total}"
+
+
+def _batch_fraction(extraction: dict) -> float:
+    """0.0–1.0 for the rail's progress bar. 0.0 when there is nothing to show."""
+    total = int(extraction.get("batch_total") or 0)
+    if total <= 0:
+        return 0.0
+    index = max(0, min(total, int(extraction.get("batch_index") or 0)))
+    return round(index / total, 4)
 
 
 def _watcher_headline(phase: str) -> str:
@@ -756,20 +1163,174 @@ def load_board_state(now: datetime | None = None) -> dict:
         # The orchestrator stamps the title on the pending document; use it when
         # the recording folder has not been written (or renamed) yet.
         header["title"] = read_pending_meeting_title()
+        header["display_title"] = header["title"] or header["display_title"]
     totals = summarize_cards(cards)
     totals["pending"] = len(pending)
 
-    pipeline = load_pipeline_status(totals, len(pending))
+    pipeline = load_pipeline_status(totals, len(pending), cards=cards, pending=pending)
+    # NEVER-BLANK OPEN. Only computed when there is nothing else to show, so a
+    # board with cards on it never pays for the memory read.
+    last_adjourned = load_last_adjourned(now) if not cards and not pending else None
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         "meeting": header,
         "totals": totals,
-        "totals_line": build_totals_line(totals),
+        "totals_line": build_totals_line(totals, last_adjourned),
         "cards": cards,
         "pending": pending,
-        "mode_note": describe_mode_note(totals),
+        "mode_note": describe_mode_note(totals, last_adjourned),
         "pipeline": pipeline,
+        "last_adjourned": last_adjourned,
     }
+
+
+# --- never-blank open --------------------------------------------------------
+#
+# THE PROBLEM THIS SOLVES. Demo-night state is a DELETED journal — that is what
+# `reset_demo` is for, and it is correct. But it meant the first thing a founder
+# saw when the board came up was a single italic sentence on an empty screen, and
+# the pitch ("this system has been quietly doing your follow-through") was
+# contradicted by the opening frame. A system that has done work should look like
+# one before anybody presses anything.
+#
+# Two sources, in order of how much they know:
+#   1. an ARCHIVED journal (executions.<ts>.jsonl, written by reset_demo) — real
+#      receipts from the last meeting that actually ran on this machine;
+#   2. MEMORY — the seeded prior standup, which is what remains after a wipe.
+# Neither fabricates. If both are empty the board says so and shows the pulse.
+
+LAST_ADJOURNED_ROWS = 4
+
+
+def archived_journal_paths() -> list[Path]:
+    """Rotated journals beside the live one, newest first. `executions.<ts>.jsonl`."""
+    live = journal_path()
+    try:
+        siblings = [
+            path
+            for path in live.parent.iterdir()
+            if path.is_file()
+            and path.name.startswith(live.stem + ".")
+            and path.name.endswith(live.suffix)
+            and path != live
+        ]
+    except OSError:
+        return []
+    siblings.sort(key=lambda path: path.name, reverse=True)
+    return siblings
+
+
+def _last_adjourned_from_archive(now: datetime) -> dict | None:
+    """The most recent archived journal, as receipts. None when there is none."""
+    for path in archived_journal_paths():
+        try:
+            records = [
+                record
+                for record in results.read_executions(path=path)
+                if record.get("record_type", results.RECORD_TYPE_EXECUTION)
+                == results.RECORD_TYPE_EXECUTION
+            ]
+        except Exception:  # noqa: BLE001 — an unreadable archive is not an error page
+            continue
+        if not records:
+            continue
+        undone = results.read_undone_dedup_keys(path=path)
+        cards = [
+            build_card(record, index, undone, now)
+            for index, record in enumerate(collapse_rewritten_records(records))
+        ]
+        cards.sort(key=lambda card: card.get("fired_at") or "")
+        if not cards:
+            continue
+        newest = cards[-1]
+        rows = [
+            {
+                "label": card["label"],
+                "kind": card["kind"],
+                "summary": card["human_summary"],
+                "mode": card["mode"],
+                "clock": card["clock"],
+            }
+            for card in cards[-LAST_ADJOURNED_ROWS:]
+        ]
+        title = read_meeting_header(newest.get("meeting_id") or "")["title"]
+        return {
+            "source": "journal",
+            # A FILENAME IS NOT A SENTENCE. This line sits in the masthead beside
+            # the running totals and under the receipts; what a reader needs from
+            # it is where the rows came from, not which timestamped file on disk
+            # holds them.
+            "source_note": "read from this machine's own record",
+            "meeting_id": newest.get("meeting_id") or "",
+            "title": title or humanize_meeting_id(newest.get("meeting_id") or "")
+                     or "The last meeting",
+            "when": format_elapsed_since(newest.get("fired_at") or "", now),
+            "count": len(cards),
+            "rows": rows,
+        }
+    return None
+
+
+def _last_adjourned_from_memory() -> dict | None:
+    """The seeded prior meeting, read out of memory. Read-only, never raises."""
+    try:
+        from . import memory_store
+
+        memory = memory_store.open_memory()
+    except Exception:  # noqa: BLE001 — no memory backend is a quiet miss, not a 500
+        return None
+    try:
+        rows: list[dict] = []
+        seen: set[str] = set()
+        title = ""
+        when = ""
+        for topic in memory.known_topics(limit=12):
+            for prior in memory.find_prior_commitments(topic, limit=4):
+                key = prior.segment_id or f"{prior.speaker}:{prior.claim}"
+                if key in seen or not prior.claim:
+                    continue
+                seen.add(key)
+                title = title or prior.meeting_id
+                when = when or prior.meeting_date
+                rows.append(
+                    {
+                        "label": prior.speaker or "someone",
+                        "kind": prior.kind or "statement",
+                        "summary": _clip(prior.claim, 110),
+                        "mode": "",
+                        "clock": prior.meeting_date or "",
+                    }
+                )
+        if not rows:
+            return None
+        return {
+            "source": "memory",
+            "source_note": "read from what Adjourn remembers",
+            "meeting_id": title,
+            "title": humanize_meeting_id(title) or "The last standup",
+            "when": when,
+            "count": len(rows),
+            "rows": rows[:LAST_ADJOURNED_ROWS],
+        }
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        try:
+            memory.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def load_last_adjourned(now: datetime | None = None) -> dict | None:
+    """What to show when the journal is empty. Journal archive first, memory second."""
+    now = now or datetime.now(UTC)
+    try:
+        from_archive = _last_adjourned_from_archive(now)
+    except Exception:  # noqa: BLE001
+        from_archive = None
+    if from_archive:
+        return from_archive
+    return _last_adjourned_from_memory()
 
 
 def _latest_meeting_id(cards: list[dict], pending: list[dict]) -> str:
@@ -783,9 +1344,25 @@ def _latest_meeting_id(cards: list[dict], pending: list[dict]) -> str:
     return ""
 
 
-def build_totals_line(totals: dict) -> str:
-    """'7 actions · 3 live · 4 sim' — the header's running count."""
+def build_totals_line(totals: dict, last_adjourned: dict | None = None) -> str:
+    """'7 actions · 3 live · 4 sim' — the header's running count.
+
+    THE COLD OPEN IS THE EXCEPTION. Before the first meeting of the session the
+    honest count is zero, and "0 actions · 0 live · 0 sim" as the entire header
+    is a system that reads like it has never done anything — in the same frame
+    where the Last adjourned panel below is showing real receipts from the last
+    meeting this machine worked. So when there is nothing in flight AND there are
+    receipts to point at, the line says what is true of BOTH halves of the screen:
+    nothing yet from this one, this many from the last one. It still never
+    invents a number — `count` is the panel's own, read off the same source.
+    """
     fired = totals.get("fired", 0)
+    pending = totals.get("pending", 0)
+    if not fired and not pending and last_adjourned:
+        receipts = int(last_adjourned.get("count") or 0)
+        if receipts:
+            noun = "receipt" if receipts == 1 else "receipts"
+            return f"Nothing yet this session · {receipts} {noun} from the last meeting"
     noun = "action" if fired == 1 else "actions"
     parts = [f"{fired} {noun}", f"{totals.get('live', 0)} live", f"{totals.get('sim', 0)} sim"]
     if totals.get("failed"):
@@ -797,16 +1374,26 @@ def build_totals_line(totals: dict) -> str:
     return " · ".join(parts)
 
 
-def describe_mode_note(totals: dict) -> str:
+def describe_mode_note(totals: dict, last_adjourned: dict | None = None) -> str:
     """One honest line about what mode the run is in. Never hides sim."""
+    # No setting names in the masthead. The header is read from across a room by
+    # someone who will never type this into a shell; "every transport simulated"
+    # is the whole fact, and Connections is where the reason lives.
     if config.is_simulation_forced():
-        return "ADJOURN_SIM=1 — every transport simulated"
+        return "simulated transports — payloads are real, the sends are not"
     if totals.get("live") and totals.get("sim"):
         return "mixed mode — badges are per action"
     if totals.get("sim") and not totals.get("live"):
         return "simulated transports — payloads are real, the sends are not"
     if totals.get("live"):
         return "live transports"
+    # A COLD OPEN HAS NO TRANSPORTS TO DESCRIBE, and it must not borrow the
+    # receipts panel's line to fill the gap — that sentence is already printed
+    # eighty pixels below, and the same words twice in one frame reads as a
+    # template that has run out of things to say. This is the mode note, so it
+    # says what is true of the mode: nothing has been sent or simulated yet.
+    if last_adjourned:
+        return "no transports yet this session"
     return ""
 
 
@@ -841,6 +1428,13 @@ def compute_version(state: dict) -> str:
             (pipeline.get("executors") or {}).get("fired_live"),
             (pipeline.get("executors") or {}).get("fired_sim"),
             (pipeline.get("executors") or {}).get("cancelled"),
+            # The rail is the thing that has to move within 1s of a new event, so
+            # the feed's high-water mark and its length are part of the identity
+            # of the page. Both are cheap integers — no row text is hashed.
+            pipeline.get("feed_seq"),
+            pipeline.get("feed_count"),
+            (pipeline.get("extraction") or {}).get("batch_index"),
+            (pipeline.get("extraction") or {}).get("batch_total"),
         ),
     }
     payload = json.dumps(signature, sort_keys=True, default=str).encode("utf-8")
@@ -858,29 +1452,55 @@ def load_ledger(now: datetime | None = None) -> dict:
     availability is reported honestly rather than faked when Falkor is down.
     """
     now = now or datetime.now(UTC)
-    records = [
-        record
-        for record in collapse_rewritten_records([
+
+    def read_ledger_records(path) -> list[dict]:
+        return [
             record
-            for record in results.read_executions(path=journal_path())
-            if record.get("record_type", results.RECORD_TYPE_EXECUTION)
-            == results.RECORD_TYPE_EXECUTION
-        ])
-        # The recap is a page about everyone, not a promise by anyone. Left in, it
-        # showed up as an "Unattributed" person owing four things.
-        if record.get("kind") not in LEDGER_EXCLUDED_KINDS
-    ]
-    undone_keys = results.read_undone_dedup_keys(path=journal_path())
+            for record in collapse_rewritten_records([
+                record
+                for record in results.read_executions(path=path)
+                if record.get("record_type", results.RECORD_TYPE_EXECUTION)
+                == results.RECORD_TYPE_EXECUTION
+            ])
+            # The recap is a page about everyone, not a promise by anyone. Left in,
+            # it showed up as an "Unattributed" person owing four things.
+            if record.get("kind") not in LEDGER_EXCLUDED_KINDS
+        ]
+
+    # Follow-through and the Ledger must never disagree about whether the app has
+    # done anything. The cold open shows last-meeting receipts from the archived
+    # journal, so when this session's journal is empty the ledger reads the same
+    # archive — badged as the last meeting's books, not this session's.
+    ledger_journal = journal_path()
+    from_last_meeting = False
+    records = read_ledger_records(ledger_journal)
+    if not records:
+        for archived_path in archived_journal_paths():
+            try:
+                archived_records = read_ledger_records(archived_path)
+            except Exception:  # noqa: BLE001 — an unreadable archive is a quiet miss
+                continue
+            if archived_records:
+                ledger_journal = archived_path
+                records = archived_records
+                from_last_meeting = True
+                break
+    undone_keys = results.read_undone_dedup_keys(path=ledger_journal)
 
     people: dict[str, dict] = {}
     for index, record in enumerate(records):
         card = build_card(record, index, undone_keys, now)
-        speaker = card["speaker"] or "Unattributed"
+        # One pass through the SAME name map the executors, the recap and the
+        # graph use, so a journal written before that map existed (or by a
+        # backfill that went round it) does not leave a row headed "You" beside
+        # a row headed "Sharique" for the same person.
+        speaker = ledger_speaker_name(card["speaker"])
         person = people.setdefault(
             speaker,
             {
                 "speaker": speaker,
                 "initials": build_initials(speaker),
+                "role_note": ledger_role_note(speaker),
                 "commitments": [],
                 "meetings": set(),
                 "live": 0,
@@ -905,9 +1525,13 @@ def load_ledger(now: datetime | None = None) -> dict:
         person["meetings"] = sorted(person["meetings"])
         person["total"] = len(person["commitments"])
         person["kinds"] = [
-            {"kind": kind, "label": KIND_LABELS.get(kind, kind), "count": count}
+            {"kind": kind, "label": ledger_kind_label(kind), "count": count}
             for kind, count in sorted(person["by_kind"].items(), key=lambda pair: -pair[1])
         ]
+        # A bucket is not a person and should not wear a person's monogram. "GU"
+        # over "Guest" is initials for a word that is not a name.
+        if person["role_note"]:
+            person["initials"] = "··"
         ledger_people.append(person)
     ledger_people.sort(key=lambda person: (-person["total"], person["speaker"]))
 
@@ -916,8 +1540,64 @@ def load_ledger(now: datetime | None = None) -> dict:
         "people": ledger_people,
         "meeting_count": len({record.get("meeting_id") for record in records if record.get("meeting_id")}),
         "commitment_count": len(records),
+        "from_last_meeting": from_last_meeting,
         "memory": describe_memory_availability(),
     }
+
+
+UNATTRIBUTED_SPEAKER = "Unattributed"
+
+# ONE CHIP, TWO TALLIES. A card's chip says LINEAR for both Linear kinds on
+# purpose — create and move are the same surface doing two things, and on a card
+# the headline says which. In the ledger's per-person tally there is no headline,
+# so the shared label rendered as "Linear 1 · Linear 1" and read like a bug.
+LEDGER_KIND_LABELS: dict[str, str] = {
+    "linear_create": "Linear new",
+    "linear_move": "Linear move",
+}
+
+
+def ledger_kind_label(kind: str) -> str:
+    return LEDGER_KIND_LABELS.get(kind) or KIND_LABELS.get(kind, kind)
+
+
+def ledger_speaker_name(speaker: str) -> str:
+    """The name a ledger row is filed under. Never a raw track label, never blank."""
+    text = (speaker or "").strip()
+    if not text:
+        return UNATTRIBUTED_SPEAKER
+    try:
+        from . import extraction
+
+        return extraction.speaker_display_name(text) or UNATTRIBUTED_SPEAKER
+    except Exception:  # noqa: BLE001 — a name is never worth an error page
+        return text
+
+
+def ledger_role_note(speaker: str) -> str:
+    """One quiet line under a ledger name, for the names that are not a person.
+
+    THE LEDGER IS A LIST OF PEOPLE, and two of its headings are not people: the
+    configured guest name covers everyone on the far end of a call that
+    diarisation never named, and Unattributed covers lines that carried no
+    speaker at all. Rendered bare, beside "Sharique", they read like a config
+    file leaked into the product — which was the finding. Saying in one clause
+    what the heading actually stands for turns both back into facts, and it is
+    the honest thing besides: Adjourn genuinely does not know who these were.
+
+    Empty for a real name — a person needs no explaining.
+    """
+    text = (speaker or "").strip()
+    if text == UNATTRIBUTED_SPEAKER:
+        return "lines that carried no speaker"
+    try:
+        from . import extraction
+
+        if text and text == extraction.guest_display_name():
+            return "everyone on the call Adjourn could not name by voice"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
 
 
 def build_initials(name: str) -> str:
@@ -1000,13 +1680,20 @@ def load_meeting_view(meeting_id: str, now: datetime | None = None) -> dict:
     recap = next((card for card in cards if card["kind"] == "recap_page"), None)
     return {
         "generated_at": now.isoformat(timespec="seconds"),
+        # Same rule as Connections: the footer says a time, not an ISO string.
+        "generated_clock": format_clock_time(now.isoformat()),
         "meeting": header,
         "cards": cards,
         "pending": pending,
         "totals": totals,
         "totals_line": build_totals_line(totals),
         "recap_url": recap["url"] if recap else "",
-        "transcript_url": f"/meetings/{meeting_id}" if meeting_id else "",
+        # SAME GUARD AS A CARD'S QUOTE. This used to be an unconditional
+        # f"/meetings/{meeting_id}", so the "Transcript" crosslink at the top of
+        # this page pointed at a 404 for every meeting the library does not hold
+        # — including the default `--replay` tape, which is the page a judge
+        # reaches by clicking Follow-through from a meeting.
+        "transcript_url": card_transcript_url(meeting_id),
     }
 
 
@@ -1085,21 +1772,25 @@ def describe_executor(kind: str) -> dict:
         return row
     if config.is_simulation_forced():
         if kind in config.forced_live_action_kinds():
+            # NO SETTING NAMES IN COPY. This tab is read from 1.5m by someone who
+            # does not run the app; "ADJOURN_LIVE_KINDS" told them nothing they
+            # could act on and read like a leaked config file. The FACT is the
+            # same either way: this run simulates, this kind is the exception.
             if missing:
                 row["mode"] = results.MODE_SIM
                 row["why"] = (
-                    f"in ADJOURN_LIVE_KINDS, but no secret for {', '.join(missing)}"
+                    f"carved out to run live, but no secret for {', '.join(missing)}"
                 )
             else:
                 row["mode"] = results.MODE_LIVE
-                row["why"] = "ADJOURN_SIM=1, but this kind is carved out by ADJOURN_LIVE_KINDS"
+                row["why"] = "this run simulates, and this kind is carved out to run live"
         else:
             row["mode"] = results.MODE_SIM
-            row["why"] = "ADJOURN_SIM=1 — every transport simulated"
+            row["why"] = "this run simulates every transport"
         return row
     if missing:
         row["mode"] = results.MODE_SIM
-        row["why"] = f"no secret for {', '.join(missing)}"
+        row["why"] = f"no secret on file for {', '.join(missing)}"
         return row
     row["mode"] = results.MODE_LIVE
     if kind in GH_CLI_KINDS:
@@ -1110,7 +1801,7 @@ def describe_executor(kind: str) -> dict:
     elif not required:
         row["why"] = "no secret required — this one writes locally"
     else:
-        row["why"] = f"{', '.join(required)} present"
+        row["why"] = f"{', '.join(required)} on file"
     return row
 
 
@@ -1165,7 +1856,8 @@ def describe_cloud_mirror(*, wait_seconds: float = 1.0) -> dict:
         return {
             **target,
             "state": "unconfigured",
-            "message": "FALKORDB_CLOUD_HOST is unset — the web surface runs on demo data",
+            "headline": "no cloud mirror configured",
+            "message": "no cloud mirror is configured — the web surface runs on demo data",
         }
     with _CLOUD_PROBE_LOCK:
         snapshot = dict(_CLOUD_PROBE)
@@ -1176,7 +1868,27 @@ def describe_cloud_mirror(*, wait_seconds: float = 1.0) -> dict:
         worker.join(timeout=max(0.0, wait_seconds))
         with _CLOUD_PROBE_LOCK:
             snapshot = dict(_CLOUD_PROBE)
-    return {**target, "state": snapshot["state"], "message": snapshot["message"]}
+    return {
+        **target,
+        "state": snapshot["state"],
+        "message": snapshot["message"],
+        # THE HEADLINE IS THE ANSWER; THE MESSAGE IS THE EVIDENCE. The probe's
+        # own sentence carries the full remote endpoint, which on this page was
+        # rendered at 20px and then again underneath it — sixty characters of
+        # cloud hostname, twice, as the largest words in the row. The row is
+        # answering one question. The probe's sentence stays, on the element's
+        # title, for whoever wants it.
+        "headline": CLOUD_STATE_HEADLINES.get(snapshot["state"], snapshot["state"]),
+    }
+
+
+#: One short answer per cloud-probe state. See describe_cloud_mirror.
+CLOUD_STATE_HEADLINES: dict[str, str] = {
+    "reachable": "answering",
+    "unreachable": "not answering",
+    "unprobed": "checking",
+    "unavailable": "unavailable",
+}
 
 
 def describe_connections(*, cloud_wait_seconds: float = 1.0) -> dict:
@@ -1185,14 +1897,20 @@ def describe_connections(*, cloud_wait_seconds: float = 1.0) -> dict:
 
     executors_rows = [describe_executor(kind) for kind in EXECUTOR_ROW_ORDER]
     live_kinds = sorted(config.forced_live_action_kinds())
+    read_at = datetime.now(UTC)
     return {
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "generated_at": read_at.isoformat(timespec="seconds"),
+        # The footer says when this page was read. It used to print the ISO
+        # string straight out — a UTC machine timestamp under a board whose
+        # every other clock is local, so at 05:40 in the room the page said
+        # 12:40. Same clock as the receipts now.
+        "generated_clock": format_clock_time(read_at.isoformat()),
         "mode": {
             "simulation_forced": config.is_simulation_forced(),
             "live_kinds": live_kinds,
             "regret_window_seconds": config.regret_window_seconds(),
             "headline": (
-                "ADJOURN_SIM=1"
+                "simulated transports"
                 + (f" · carved out: {', '.join(live_kinds)}" if live_kinds else "")
                 if config.is_simulation_forced()
                 else "live transports"
@@ -1208,8 +1926,8 @@ def describe_connections(*, cloud_wait_seconds: float = 1.0) -> dict:
             "github_allowlist": sorted(config.ALLOWED_GITHUB_REPOS),
             "linear_team": config.linear_team_key(),
             "graph": config.graph_name(),
-            "journal": str(journal_path()),
-            "recaps": str(config.recaps_directory()),
+            "journal": display_journal_path(journal_path()),
+            "recaps": display_directory_label(config.recaps_directory()),
             "board_bind": f"{BOARD_HOST}:{config.board_port()}",
         },
         "gh_cli_present": github_cli_present(),
@@ -1494,6 +2212,7 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
     app.jinja_env.globals.update(
         quiet_header_line=QUIET_HEADER_LINE,
         empty_state_line=EMPTY_STATE_LINE,
+        privacy_line=PRIVACY_LINE,
     )
 
     # ONE APP, FIVE TABS. meetings_ui owns Meetings and Live and carries its own
@@ -1510,6 +2229,11 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
         app.config["ADJOURN_MEETINGS_MOUNTED"] = False
         app.config["ADJOURN_MEETINGS_MOUNT_ERROR"] = str(error)
         print(f"[board] the Meetings tab could not be mounted: {error}")
+    # A card's quote links to /meetings/<id>. If that Blueprint is not there the
+    # link would be a 404 on the demo's closing beat, so the cards drop it rather
+    # than offer a door that opens onto nothing.
+    global MEETINGS_TAB_MOUNTED
+    MEETINGS_TAB_MOUNTED = bool(app.config.get("ADJOURN_MEETINGS_MOUNTED"))
 
     def render_page(template: str, view: str, **context):
         """Every page gets the same shell context, so the tab bar cannot drift."""
@@ -1600,7 +2324,7 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
                 "unchanged": False,
                 "header_html": render_header(state),
                 "pending_html": render_pending(state["pending"]),
-                "cards_html": render_cards(state["cards"]),
+                "cards_html": render_cards(state["cards"], state.get("last_adjourned")),
                 "guts_html": render_guts(state.get("pipeline") or {}),
                 "totals_line": state["totals_line"],
                 "card_count": len(state["cards"]),
@@ -1901,6 +2625,13 @@ def main() -> None:
     print(f"[board] journal: {journal_path()}")
     print(f"[board] pending: {pending_path()}")
     print(f"[board] tabs: /meetings/ · /meetings/live · / · /ledger · /connections")
+    # The presentation filter's detail — how many meetings are listed, and the
+    # variable that switches it off — is the OPERATOR's, and it used to be
+    # printed on the Meetings tab where a judge read it. It belongs here.
+    from . import meetings_ui
+
+    if meetings_ui.presentation_mode_enabled():
+        print(meetings_ui.presentation_operator_note())
     print("[board] undo requires this run's token; it is in the page, not in the log")
     application.run(host=BOARD_HOST, port=port, debug=False, threaded=True)
 

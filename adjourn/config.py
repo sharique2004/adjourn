@@ -309,6 +309,13 @@ def github_repo() -> str:
     return DEFAULT_GITHUB_REPO
 
 
+# A meeting never commits code. There is deliberately NO pr_autocommit_branches()
+# here and no ADJOURN_PR_AUTOCOMMIT_BRANCHES setting: when a meeting corrects a
+# line, pr_review_suggestion_executor leaves a review suggestion on the diff and
+# the humans on the PR decide. The capability is absent from the code rather than
+# merely defaulted off, so no .env line can turn speech into a push.
+
+
 def slack_channel() -> str:
     """The one Slack channel live sends may reach. Config only — never a payload.
 

@@ -225,7 +225,9 @@ def test_engine_ladder() -> None:
           extraction.extract_statements([], "Empty Meeting") == [])
     fixture_run = extraction.extract_statements(
         [], "Demo", meeting_id=DEMO_MEETING, engine=extraction.ENGINE_FIXTURES)
-    check("the fixtures engine works with no segments at all", len(fixture_run) == 11,
+    # TWELVE since the PR-review beat was merged into the demo meeting, so one
+    # bare `--replay` shows every action kind including the inline suggestion.
+    check("the fixtures engine works with no segments at all", len(fixture_run) == 12,
           str(len(fixture_run)))
 
 

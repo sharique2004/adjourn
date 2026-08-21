@@ -108,7 +108,11 @@ def build_pull_request_body(action: Action) -> str:
         "",
         "---",
         "",
-        f"_Opened by Adjourn the moment {meeting} ended · transcript never left this machine_",
+        # Precise: the body above prints a verbatim sentence, so the absolute
+        # claim is false here. See github_update_executor's footer.
+        f"_Opened by Adjourn the moment {meeting} ended · the audio and the full "
+        f"transcript stayed on that Mac — the sentence quoted above is the only "
+        f"text that travelled_",
     ]
     return "\n".join(lines) + "\n"
 

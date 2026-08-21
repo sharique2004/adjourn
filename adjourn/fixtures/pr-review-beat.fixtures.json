@@ -3,7 +3,7 @@
   "_stage_2_closed": "EntityReferences carries pr_topic / old_value / new_value, so pr_topic 'join button' and new_value '#6b7f99' ride in entity_refs and survive load_fixture_statements(). planner.build_pr_review_suggestion routes them to kind 'pr_review_suggestion' and suppresses the github_update that used to carry this beat. old_value stays absent by design and is derived from the diff at execution time.",
   "meeting": {
     "meeting_id": "pr-review-beat",
-    "title": "MMM Standup — PR review beat",
+    "title": "Adjourn standup — PR review beat",
     "date": "2026-08-21"
   },
   "statements": [

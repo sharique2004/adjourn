@@ -172,8 +172,19 @@ def issue_comment_key(topic: str, kind: str = "decision") -> str:
 check("the same issue under two topic names is ONE comment",
       issue_comment_key("cache layer") == issue_comment_key("caching"),
       f"{issue_comment_key('cache layer')} != {issue_comment_key('caching')}")
-check("a different statement KIND on the same issue is a different comment",
-      issue_comment_key("caching", "decision") != issue_comment_key("caching", "assignment"))
+# INVERTED 2026-08-21, and the reason is a reproduced duplicate. The kind used to
+# be in this key, on the theory that a decision and a reassignment are two things
+# worth saying. What actually happens is that ONE sentence takes a different
+# label on a second pass: from cold memory, pass 1 called "the ingestion cache
+# work is basically already done" a `decision` and could not resolve an issue;
+# pass 1's ingest taught memory the cache-layer -> #2 handle; pass 2 resolved it,
+# called it an `update`, and posted a SECOND comment on a public issue that
+# neither the journal nor memory could dedup, because both were asked about a key
+# that had never existed. Meeting + issue is the identity now: one standup, at
+# most one comment per issue.
+check("the same issue in the same meeting is ONE comment whatever the extractor labelled it",
+      issue_comment_key("caching", "decision") == issue_comment_key("caching", "assignment"),
+      f"{issue_comment_key('caching', 'decision')} != {issue_comment_key('caching', 'assignment')}")
 check("a different issue is a different comment",
       issue_comment_key("caching") != (
           planner.build_github_update(

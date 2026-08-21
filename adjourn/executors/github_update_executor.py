@@ -149,7 +149,14 @@ def build_comment_markdown(action: Action) -> str:
         f"_Meeting: {meeting}"
         + (f", {meeting_date}" if meeting_date else "")
         + " · Written by Adjourn the moment the meeting ended · "
-        "transcript never left this machine_",
+        # PRECISE, because this sits directly beneath a verbatim quote on a
+        # public issue. "The transcript never left this machine" printed three
+        # lines under an excerpt OF that transcript is the single most quotable
+        # thing in the product, and it is not true. What is true: the recording
+        # and the full transcript stayed on the Mac, and the one sentence above
+        # is the only text that travelled. Same wording as the recap footer.
+        "the audio and the full transcript stayed on that Mac — the sentence "
+        "quoted above is the only text that travelled_",
     ]
     return "\n".join(lines) + "\n"
 

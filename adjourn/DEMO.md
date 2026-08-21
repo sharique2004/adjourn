@@ -140,9 +140,9 @@ to ten. Put the browser at **175–200%**, or mirror to a large display.
 
 That used to be mutually exclusive with seeing any cards: at 175% on a 1512px
 window the header and the pipeline panel ate the entire first screen. **The
-pipeline panel now starts collapsed** — a single summary strip carrying all four
-stage headlines, which you click to open. Measured after the change, on the
-dress-rehearsal journal:
+pipeline is now an always-on rail down the right-hand side** rather than a block
+above the cards, so the cards keep the first screen and the stages stay visible
+the whole time. Measured after the change, on the dress-rehearsal journal:
 
 | Viewport | Star card top | Cards above the fold |
 |---|---|---|
@@ -294,8 +294,10 @@ Both are now mapped once, in extraction, so the Slack body, the Linear
 description, the GitHub blockquote and the recap ledger all get it for free:
 
 ```
-ADJOURN_SPEAKER_NAME=Sharique          # the mic track. Default: Sharique
-ADJOURN_OTHER_SPEAKER_NAME="A teammate"  # the system track. Default: A teammate
+ADJOURN_SPEAKER_NAME=Sharique   # the mic track. Default: Sharique
+ADJOURN_GUEST_NAME=Guest        # the system track. Default: Guest
+                                # (ADJOURN_OTHER_SPEAKER_NAME is the old spelling
+                                #  and is still read when the new one is unset)
 ```
 
 The far end is a **description, not a name**, because Adjourn genuinely does not
@@ -555,7 +557,7 @@ Use these verbatim. Every one is true, and each is a better line than pretending
 |---|---|
 | A card is badged **SIM** | "Simulated — same code path, real payload, it just didn't make the last call. The badge is the product." |
 | **Email** is sim (it always is tonight) | "No Gmail app password on this machine, so it renders the full message and stops. A missing credential is a mode here, not a crash." |
-| The email card shows **`div@example.com`** | Do not let this pass unremarked — it reads as a placeholder to anyone technical, right under "it built the exact payload". The card says so itself: *"placeholder address, set ADJOURN_ADDRESS_BOOK"*. Better: put real addresses in `adjourn/.env` before you start. |
+| The email card shows **`div@example.com`** | Do not let this pass unremarked — it reads as a placeholder to anyone technical, right under "it built the exact payload". The card says so itself: *"simulated — no address on file"*. Better: put real addresses in `ADJOURN_ADDRESS_BOOK` in `adjourn/.env` before you start. |
 | A **Linear ticket has no labels** | True and deliberate. The executor applies labels the workspace already has and **never creates one**, and the SHA workspace has no `from-meeting` label. "It won't invent a label in your workspace to tag its own work. That's a decision, not an omission." |
 | Both **calendar holds** name the cache layer | "Ship: cache layer" and "Review: cache layer" — same work item, two commitments. If the review hold lands on **Fri 28 Aug**: "today is Friday, and 'let's review Friday' on a Friday means next Friday. A *deadline* of 'by Friday' would still mean today. Different reading for a different kind of sentence — and it's a table, not a guess." |
 | **Extraction is slow** and you are out of script | "Four model calls in parallel through the Claude CLI, on-device transcription before that. That's the honest cost of not sending the transcript anywhere." Then §6 — the restraint corpus is a good thing to talk about while you wait. |
@@ -704,11 +706,16 @@ ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub \
 the **real** extract → plan → execute path. `--replay pr-review-beat` runs §7.
 A typo still refuses rather than reading MeetingScribe's live buffer.
 
-The pipeline panel starts **collapsed** — click **DETAILS** on the summary strip
-to open it. Watcher reads `replay · transcript ready`, Extraction ticks from
-running → N statements with the silent-line count beside it, Planner shows what
-the table decided versus ignored, Executors show HOLDING / LIVE / SIM as cards
-land. The open/closed state survives the one-second fragment swap.
+The pipeline rail is **always on**, down the right of Follow-through — there is
+nothing to expand. Watcher reads `replay · transcript ready`, Extraction ticks
+`reading N batches` → `batch 1/N` → N statements with the silent-line count
+beside it, Planner shows what the table decided versus ignored, Executors show
+HOLDING / LIVE / SIM as cards land. It survives the one-second fragment swap.
+
+The replayed meeting is also a row on **Meetings**, badged `REPLAY`, and its
+transcript is where every card's quote links back to — that is beat E on the
+`--replay` path. It is listed because `agi-living-room` is named in
+`ADJOURN_PRESENTATION_MEETINGS`; a tape is never listed unless you list it.
 
 ---
 

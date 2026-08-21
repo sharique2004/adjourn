@@ -33,10 +33,45 @@
                system-ui, "Segoe UI", sans-serif;
   --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
                 Georgia, serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* JetBrains Mono when the machine has it, the system's own mono when it does
+   * not. NOT web-loaded on purpose: this app runs on a laptop with the wifi off
+   * as often as not, and a font that arrives over the network is a font that
+   * renders as a fallback in the one room where it matters. */
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+               Consolas, monospace;
 
   --radius: 14px;
   --page: 1080px;
+
+  /* ONE SET OF CURVES, so everything that moves on this app moves in the same
+   * hand. The built-in keywords are too soft to read as deliberate at the
+   * durations below; these are the strong variants.
+   *   --ease-out    things arriving and leaving. Fast first, so the eye is paid
+   *                 back in the first 40ms — the moment it is actually watching.
+   *   --ease-move   things travelling across the screen and staying.
+   * Nothing in this file uses ease-in: it withholds the first frames, which is
+   * exactly the interval that decides whether a UI feels quick. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* THE FOLD BUDGET, in one place so it can be measured rather than argued
+   * about. At 1512x900 the chrome above the first card must stay under 180px:
+   * masthead 88 + tab row 45 = 133 measured, which leaves 767px for the column
+   * title and the first three cards. The rail lives to the RIGHT of the cards
+   * and therefore costs this budget nothing. */
+  --rail-width: 336px;
+  --rail-gap: 26px;
+  /* The masthead is sticky at top:0 and measures ~88px; the rail sticks just
+   * under it. Overridden in the short-viewport block, where the masthead is
+   * squeezed further. */
+  --chrome-top: 94px;
+  /* How much vertical room the rail gives back. Bigger than --chrome-top on
+   * purpose: at scrollTop 0 the rail starts BELOW the tab row (144px measured at
+   * 1512x900), not at the sticky offset, so sizing it against --chrome-top alone
+   * pushed its last 26px — the privacy line — under the fold on the opening
+   * frame. 160 keeps the whole rail on the first screen and still leaves it
+   * nearly full height once the card feed has scrolled under it. */
+  --rail-inset: 160px;
 }
 
 /* One accent per action kind. Linear's two kinds share a family on purpose —
@@ -66,19 +101,43 @@ body {
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* THE PAGE FILLS THE WINDOW. On a short tab — Live at rest, an empty Ledger,
+   * the cold-open board — the footer used to land wherever the content stopped
+   * and leave 200-400px of bare ink under it, which reads from the back of a
+   * room as a page that failed to finish loading. The column pushes the footer
+   * to the bottom edge instead; nothing above it moves. The explicit width on
+   * the children is what keeps that true: a flex item with `margin: 0 auto`
+   * stops stretching and falls back to max-content, which would quietly narrow
+   * every page by ~200px. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
+
+/* Named rather than `body > *`: .toast is position:fixed and a width here would
+ * pin it to 560px instead of letting it shrink to its sentence. */
+body > header,
+body > nav,
+body > main,
+body > footer { width: 100%; }
 
 .spacer { flex: 1 1 auto; }
 
 /* --- masthead ------------------------------------------------------------ */
 
+/* THE HEADER IS PART OF THE FOLD BUDGET. It was 26/18 padding around a 30px
+ * title and measured 145px on its own; with the tab row that put the first card
+ * at 289px on a 900px screen and the audience saw three of eight cards. Nothing
+ * was removed — the title, the running totals, the mode note and the tagline are
+ * all still here — it is just no longer sized like a magazine cover. Measured
+ * after: 88px. */
 .masthead {
   position: sticky;
   top: 0;
   z-index: 20;
   margin: 0 auto;
   max-width: var(--page);
-  padding: 26px 0 18px;
+  padding: 16px 0 10px;
   background: linear-gradient(var(--ink) 72%, rgba(10, 11, 13, 0));
 }
 
@@ -88,19 +147,19 @@ body {
   gap: 24px;
   flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
-  padding-bottom: 16px;
+  padding-bottom: 10px;
 }
 
 .meeting-title {
   margin: 0;
-  font-size: 30px;
+  font-size: 25px;
   font-weight: 640;
   letter-spacing: -0.022em;
   line-height: 1.15;
 }
 
 .meeting-meta {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -136,31 +195,72 @@ body {
  * (meetings.css carries the identical pair for the pages it styles; keeping it
  * here is what makes the board-served pages behave the same.) */
 .viewbar {
-  margin: 14px auto 22px;
+  margin: 8px auto 14px;
   max-width: var(--page);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .viewbar .viewlink { white-space: nowrap; }
 
+/* NOT A SIXTH TAB. It has to be legible as the product's name on every screen
+ * and it must not look like something you can press: no pill, no hover, and a
+ * hairline between it and the first tab so the eye reads a mark and then a set
+ * of controls. Wide tracking and a smaller size do the rest — the tabs are
+ * sentence-case words at 13.5px, this is a spaced 12px cap-line, and the two
+ * cannot be confused at a glance from any distance. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  margin-right: 10px;
+  padding-right: 14px;
+  border-right: 1px solid var(--line-strong);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 640;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* ONE WEIGHT AT EVERY STATE. The current tab used to be told apart partly by
+ * being heavier, which re-measured the word and nudged all four tabs beside it
+ * a pixel or two on every navigation. The state is carried by FILL and COLOUR
+ * instead, both of which cost the layout nothing.
+ *
+ * 34px tall rather than 25: a tab bar is a control, and a 25px control is a
+ * control you have to aim at. */
 .viewlink {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
   border: 1px solid transparent;
   border-radius: 999px;
   color: var(--text-dimmer);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-size: 13.5px;
+  font-weight: 550;
+  letter-spacing: 0.015em;
   text-decoration: none;
 }
 
-.viewlink:hover { color: var(--text-dim); }
+@media (hover: hover) and (pointer: fine) {
+  .viewlink:hover { color: var(--text-dim); background: rgba(255, 255, 255, 0.035); }
+  .viewlink.is-current:hover { background: var(--ink-raised-2); }
+}
 
 .viewlink.is-current {
   border-color: var(--line-strong);
-  background: var(--ink-raised);
+  background: var(--ink-raised-2);
   color: var(--text);
+}
+
+.viewlink:focus-visible {
+  outline: 2px solid var(--text-dim);
+  outline-offset: 2px;
 }
 
 /* --- columns ------------------------------------------------------------- */
@@ -170,7 +270,39 @@ body {
   max-width: var(--page);
 }
 
-.column { margin-bottom: 34px; }
+/* CARDS LEFT, RAIL RIGHT. Below 1180px the rail stacks under the cards rather
+ * than squeezing them: a 700px card column with a 336px rail beside it is two
+ * narrow columns and no good column. */
+@media (min-width: 1180px) {
+  .board-split {
+    max-width: calc(var(--page) + var(--rail-width) + var(--rail-gap));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rail-width);
+    gap: var(--rail-gap);
+    align-items: start;
+  }
+}
+
+.board-cards { min-width: 0; }
+
+.board-rail { min-width: 0; }
+
+@media (min-width: 1180px) {
+  /* Sticky under the masthead, so the thinking stays on screen while the card
+   * feed scrolls beneath it. Its own live region scrolls internally. */
+  .board-rail {
+    position: sticky;
+    top: var(--chrome-top);
+    max-height: calc(100vh - var(--rail-inset));
+    display: flex;
+  }
+}
+
+/* 34px here put the fourth card's last pixel one below a 900px fold on the demo
+ * journal — measured, not guessed. The gap between "In flight" and "Executed"
+ * still reads as a break at 24px, and it is the cheapest four cards on the
+ * board. */
+.column { margin-bottom: 24px; }
 
 .column-title {
   margin: 0 0 12px;
@@ -245,7 +377,11 @@ body {
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  /* The label is the accent carried 20% toward white. The border and the fill
+   * keep the true accent, so the kind still reads by colour at a glance; the
+   * text clears AA, which the raw accent did not — Linear's #5e6ad2 measured
+   * 3.4:1 on its own chip. Worst case after the mix is 4.9:1. */
+  color: color-mix(in srgb, var(--accent) 80%, #ffffff);
   font-size: 11.5px;
   font-weight: 650;
   letter-spacing: 0.08em;
@@ -294,9 +430,14 @@ body {
   border: 1px solid color-mix(in srgb, var(--fail) 40%, transparent);
 }
 
+/* THE ONE THING ON AN UNDONE CARD THAT MUST STILL READ. The card is dimmed to
+ * 0.55 on purpose, and every colour inside it is dimmed with it — which put the
+ * badge that says UNDONE at 2.7:1, the least legible thing on the card whose
+ * entire job is to announce a state. Full-strength ink and a heavier fill carry
+ * it through the dim at 4.8:1. */
 .badge-undone {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-dimmer);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
   border: 1px solid var(--line-strong);
 }
 
@@ -331,6 +472,39 @@ body {
   font-style: italic;
   font-size: 16px;
   line-height: 1.45;
+}
+
+/* THE QUOTE IS A LINK, AND LOOKS LIKE THE QUOTE. No blue, no underline at rest:
+   an underlined link inside an italic serif pull-quote reads as a footnote and
+   pulls the eye off the headline, which is the card's actual argument. The
+   affordance shows up on hover — a rule under the words and the arrow arriving —
+   which is exactly when the viewer is asking "can I open this?". */
+.quote-trace {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.quote-trace-mark {
+  font-style: normal;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.quote-trace:hover,
+.quote-trace:focus-visible {
+  color: var(--text);
+  border-bottom-color: var(--line-strong);
+}
+
+.quote-trace:hover .quote-trace-mark,
+.quote-trace:focus-visible .quote-trace-mark { opacity: 0.75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .quote-trace,
+  .quote-trace-mark { transition: none; }
 }
 
 .quote-speaker {
@@ -373,8 +547,17 @@ body {
   font-style: italic;
 }
 
+/* SECONDARY, AND STILL A BUTTON. Undo is the escape hatch on a card whose point
+ * is that the thing already happened, so it must never out-shout the headline —
+ * but "quiet" was doing too much work: a 26px-tall ghost control is hard to hit
+ * and easy to miss. It keeps the ghost treatment and gains a real target and a
+ * real press. The colour it turns is the failure red, which is the honest
+ * signal for "this reverses a live write". */
 .undo {
-  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: transparent;
@@ -386,14 +569,34 @@ body {
   cursor: pointer;
 }
 
-.undo:hover {
-  border-color: color-mix(in srgb, var(--fail) 55%, transparent);
-  color: var(--fail);
+@media (hover: hover) and (pointer: fine) {
+  .undo:hover {
+    border-color: color-mix(in srgb, var(--fail) 55%, transparent);
+    background: color-mix(in srgb, var(--fail) 9%, transparent);
+    color: var(--fail);
+  }
 }
 
-.undo:active { transform: translateY(1px); }
+.undo:active { transform: scale(0.97); }
 .undo[disabled] { opacity: 0.4; cursor: default; transform: none; }
-.undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.undo:focus-visible { outline: 2px solid var(--text-dim); outline-offset: 2px; }
+
+/* Cancel, on a countdown, is the one of these two anyone actually presses — a
+ * 60s window exists to be usable. Same family, one step less quiet. */
+.undo-cancel {
+  min-height: 38px;
+  padding: 0 18px;
+  border-color: color-mix(in srgb, var(--hold) 40%, transparent);
+  color: var(--hold);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .undo-cancel:hover {
+    border-color: color-mix(in srgb, var(--hold) 70%, transparent);
+    background: color-mix(in srgb, var(--hold) 12%, transparent);
+    color: var(--hold);
+  }
+}
 
 /* --- pending / countdown ------------------------------------------------- */
 
@@ -410,23 +613,28 @@ body {
 
 .ring-wrap {
   position: relative;
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
 }
 
 .ring { display: block; transform: rotate(-90deg); }
 
 .ring-track {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.09);
-  stroke-width: 3;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 3.5;
 }
 
+/* THE RING IS CALM ON PURPOSE. It is counting down to something the viewer may
+ * want to stop, and a countdown that flashes reads as an alarm — which would
+ * make Cancel look like the expected answer rather than the available one. It
+ * fills smoothly, in the hold amber the HOLDING badge above it already uses,
+ * and does nothing else. */
 .ring-progress {
   fill: none;
   stroke: var(--hold);
-  stroke-width: 3;
+  stroke-width: 3.5;
   stroke-linecap: round;
 }
 
@@ -438,8 +646,9 @@ body {
   justify-content: center;
   color: var(--hold);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 /* --- empty state --------------------------------------------------------- */
@@ -517,18 +726,64 @@ body {
   letter-spacing: 0.04em;
 }
 
+.person-id { min-width: 0; }
+
 .person-name { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-.person-meta { margin: 3px 0 0; color: var(--text-dimmer); font-size: 13px; }
+
+/* THE HEADINGS THAT ARE NOT PEOPLE. Two of them are buckets — everybody on the
+ * call that diarisation never named, and lines that carried no speaker at all —
+ * and set bare beside "Sharique" they read like a placeholder somebody forgot to
+ * fill in. One clause turns the bucket back into a fact. Set in the serif the
+ * quotes use, because it is a sentence and not a datum. */
+.person-role {
+  margin: 3px 0 0;
+  color: var(--text-dimmer);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+
+.person-meta {
+  margin: 4px 0 0;
+  color: var(--text-dimmer);
+  font-size: 13px;
+}
+
+/* The counts read down a column of people, so they are mono and tabular — the
+ * digits line up between one person's row and the next. */
+.person-count {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
 
 .kind-tally { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* A COUNT, NOT A BUTTON. These sat in the kind's accent inside an accent-tinted
+ * border, which at the top-right of every person made a row of small coloured
+ * pills that out-shouted the person's name. Same information, one step back:
+ * the label goes quiet, the number keeps the accent. */
 .tally {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dimmer);
   font-size: 11px;
   letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tally-count {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -553,9 +808,195 @@ body {
 .commitment-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   margin: 9px 0 0;
+}
+
+/* THE CLOCKS LINE UP DOWN THE PERSON. Every row on a ledger carries the same
+ * four facts in the same order — kind, mode, time, meeting — and with a bare
+ * flex row the kind chip's own width decided where the other three started, so
+ * "GITHUB" and "PULL REQUEST" put their timestamps 40px apart on consecutive
+ * lines. Two min-widths, no grid: the chip and the badge reserve their column,
+ * anything unusual (UNDONE, FAILED) still just flows after them. */
+/* 112px is the width of the longest label in KIND_LABELS ("PULL REQUEST") at
+ * this size and tracking. A floor set any shorter puts one row's timestamp out
+ * of the column, which is worse than a slightly wide column on all of them. */
+.commitment-meta .chip-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+}
+
+.commitment-meta .badge {
+  justify-content: center;
+  min-width: 52px;
+}
+
+/* --- connections: the preflight table -------------------------------------
+ *
+ * One row per executor, and the columns are fixed so the badges line up down
+ * the page: the answer to "which of this is real" is the shape of that column,
+ * read in a second, before a single sentence beside it has been.
+ */
+
+.preflight {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.preflight-row {
+  display: grid;
+  /* The last column is 140 because `pr_review_suggestion` measures 138 at
+   * 11.5px mono; at 132 it was clipped without an ellipsis at 1280 wide. */
+  grid-template-columns: 118px 74px minmax(0, 1fr) minmax(0, auto) 140px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  /* The kind's accent, on the left edge, the same 3px the ledger uses. Colour
+   * is how a reader finds GitHub among nine rows without reading nine labels. */
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.preflight-row:last-child { border-bottom: none; }
+
+.preflight-row[data-mode="sim"] { background: rgba(255, 255, 255, 0.014); }
+
+.preflight-mode { justify-self: start; }
+
+.preflight-why {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14.5px;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+
+.preflight-needs {
+  min-width: 0;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.preflight-kind {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+  /* No opacity here: at 0.8 the slug on the SIM row measured 4.49:1, which is
+   * a fail by a hundredth on the one row a reader most wants to check. */
+}
+
+/* Presence, six at a time. Auto-fit rather than a fixed count so the block is
+ * one row of six on a laptop and folds without a breakpoint. */
+.secretgrid {
+  display: grid;
+  /* 250px, because the name is the point and `gmail_app_password` truncated to
+   * `gmail_app_…` is a row that has stopped answering the question. */
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.secretrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ink-raised);
+}
+
+.secretrow[data-present="false"] { background: transparent; border-style: dashed; }
+
+.secretname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+
+.secretrow[data-present="false"] .secretname { color: var(--text-dimmer); }
+
+.memory-counts {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.targets {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.targetrow {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.targetrow:last-child { border-bottom: none; }
+
+.targetname {
+  color: var(--text-dim);
+  font-size: 14px;
+  letter-spacing: -0.005em;
+}
+
+.targetvalue {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.targetvalue .external-id { color: var(--text); font-size: 13px; }
+
+.targetnote {
+  color: var(--text-dimmer);
+  font-size: 12.5px;
+}
+
+.preflight-split {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .preflight-row {
+    grid-template-columns: 110px 70px minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .preflight-needs, .preflight-kind { grid-column: 3; text-align: left; }
 }
 
 /* --- toast --------------------------------------------------------------- */
@@ -583,15 +1024,30 @@ body {
 
 .footfall {
   margin: 46px auto 0;
+  /* auto, so a short page puts the footer on the bottom edge rather than
+   * stranding it mid-window; 46px stays the floor on a page that overflows. */
+  margin-top: auto;
+  padding-top: 46px;
   max-width: var(--page);
   display: flex;
+  flex-wrap: wrap;
   gap: 9px;
   color: var(--text-dimmer);
   font-size: 12px;
   letter-spacing: 0.04em;
 }
 
-.dot-sep { color: var(--line-strong); }
+/* THE SETTLED PRIVACY CLAIM, on every page this app serves. It is deliberately
+ * the same sentence everywhere — board footer, rail, Live masthead, recap and
+ * the executor artifacts — because a claim that is worded differently in five
+ * places is five claims, and the audience only has to catch one of them being
+ * wrong. */
+.footfall-privacy { color: var(--text-dimmer); }
+
+/* The same weight as the literal "·" inside the footer's own phrases. At
+ * --line-strong (a hairline token, 1.4:1) these two read as missing, so one
+ * footer line carried two kinds of separator. */
+.dot-sep { color: var(--text-dimmer); }
 
 /* --- motion --------------------------------------------------------------
  * Everything animated is opt-in: no animation is declared outside this block,
@@ -599,12 +1055,26 @@ body {
  */
 
 @media (prefers-reduced-motion: no-preference) {
+  /* THE ARRIVAL. A card is a thing that just happened, and it comes in from the
+   * top of the feed the way a new line comes in — down and settling, not fading
+   * up out of the page. 220ms on the strong ease-out: long enough to be seen as
+   * a movement from a metre and a half away, short enough that a replay landing
+   * five cards at once is over before anyone has finished reading the first.
+   *
+   * It starts at 0.985 rather than 0. Nothing arrives in a room by expanding
+   * from a point, and a card that does reads like a notification popping rather
+   * than a receipt being filed.
+   *
+   * --enter-delay is set by board.js, and ONLY across the cards that are new on
+   * this poll — a stagger keyed on position in the column would delay a single
+   * arrival by however many cards happened to be above it. */
   .card.is-entering {
-    animation: card-slide-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: card-slide-in 220ms var(--ease-out) both;
+    animation-delay: var(--enter-delay, 0ms);
   }
 
   @keyframes card-slide-in {
-    from { opacity: 0; transform: translateY(-10px) scale(0.995); }
+    from { opacity: 0; transform: translateY(-12px) scale(0.985); }
     to   { opacity: 1; transform: none; }
   }
 
@@ -617,58 +1087,92 @@ body {
   }
 
   .ring-progress { transition: stroke-dashoffset 240ms linear; }
-  .undo, .link, .viewlink { transition: color 120ms ease, border-color 120ms ease; }
+  .undo, .link {
+    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease,
+                transform 140ms var(--ease-out);
+  }
+  .viewlink { transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease; }
   .toast { transition: opacity 160ms ease; }
 }
 
+/* REDUCED MOTION IS NOT NO MOTION. A card that simply appears between two polls
+ * is indistinguishable from a card that was always there, and the whole point of
+ * the feed is that you can see the new one arrive. So the movement goes and the
+ * arrival stays: opacity only, nothing travelling, nothing scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .card.is-entering { animation: card-fade-in 180ms ease both; }
+  .rail-row.is-new { animation: card-fade-in 160ms ease both; }
 
-/* --- guts panel (pipeline inner workings) -------------------------------- */
+  @keyframes card-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+}
+
+
+/* --- the rail (pipeline inner workings, beside the cards) ---------------- */
 
 .guts {
-  margin: 0 auto 22px;
-  max-width: var(--page);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  margin: 0 0 22px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--ink-raised);
   overflow: hidden;
 }
 
-/* The panel is a <details> whose <summary> carries every live number, so the
- * pipeline stays on screen at ~44px instead of ~250px and the pinned cards clear
- * the fold at the runbook's own 175% presentation zoom. Measured, not guessed —
- * see the comment on guts_panel() in templates/board.html. */
+@media (min-width: 1180px) { .guts { margin-bottom: 0; } }
+
 .guts-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  cursor: pointer;
-  list-style: none;
-  min-width: 0;
-}
-
-.guts-head::-webkit-details-marker { display: none; }
-.guts[open] .guts-head { border-bottom: 1px solid var(--line); }
-
-.guts-strip {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
+  gap: 9px;
   flex-wrap: wrap;
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid var(--line);
   min-width: 0;
-  color: var(--text);
-  font-size: 13.5px;
-  font-variant-numeric: tabular-nums;
 }
 
-.guts-chip {
-  display: inline-flex;
+/* --- the four stages ----------------------------------------------------- */
+
+.rail-stages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-stage {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: baseline;
-  gap: 6px;
-  white-space: nowrap;
+  gap: 0 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.guts-chip-label {
+.rail-stage:last-child { border-bottom: none; }
+
+/* THREE STATES, THREE SHAPES — not three shades of the same shape. From 1.5m a
+ * grey dot and an amber dot are two dots; a HOLLOW dot and a filled one are two
+ * different things, and the difference survives a projector that eats
+ * saturation. Waiting is hollow, working is filled and amber, done is filled and
+ * green. Colour is the confirmation, not the signal. */
+.rail-dot {
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-dimmer);
+}
+
+.rail-stage-name {
   color: var(--text-dimmer);
   font-size: 10.5px;
   font-weight: 600;
@@ -676,49 +1180,461 @@ body {
   text-transform: uppercase;
 }
 
-.guts-chip[data-phase="running"],
-.guts-chip[data-phase="pending"],
-.guts-chip[data-phase="meeting_stopped"] { color: var(--hold); }
-
-.guts-chip[data-phase="done"],
-.guts-chip[data-phase="transcript_ready"] { color: var(--live); }
-
-.guts-chip[data-phase="idle"],
-.guts-chip[data-phase="waiting"] { color: var(--text-dim); }
-
-.guts-toggle {
-  color: var(--text-dimmer);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
+.rail-stage-line {
+  grid-column: 2;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  font-variant-numeric: tabular-nums;
 }
 
-.guts[open] .guts-toggle::after { content: " ▴"; }
-.guts:not([open]) .guts-toggle::after { content: " ▾"; }
+.rail-stage-badges {
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
 
-/* PRESENTATION ZOOM. 175% on a 1512px window is an 864x514 CSS viewport, and at
- * that size the pinned card's last four pixels fell below the fold — close
- * enough to look deliberate and wrong enough to matter, because the card the
- * whole narration is built around should be entirely on the first screen. This
- * block buys ~30px back from chrome nobody reads. Keyed on viewport HEIGHT, so
- * it only fires when the screen is short: a laptop at 100% is untouched. */
+.rail-stage-badges:empty { display: none; }
+
+/* Phase colour, on the dot AND the line, so the stage that is working is the one
+ * thing on the rail with saturation. */
+.rail-stage[data-phase="running"] .rail-dot,
+.rail-stage[data-phase="pending"] .rail-dot,
+.rail-stage[data-phase="meeting_stopped"] .rail-dot {
+  background: var(--hold);
+  box-shadow: inset 0 0 0 1.5px var(--hold);
+}
+
+.rail-stage[data-phase="done"] .rail-dot,
+.rail-stage[data-phase="transcript_ready"] .rail-dot {
+  background: var(--live);
+  box-shadow: inset 0 0 0 1.5px var(--live);
+}
+
+.rail-stage[data-phase="running"] .rail-stage-line,
+.rail-stage[data-phase="pending"] .rail-stage-line,
+.rail-stage[data-phase="meeting_stopped"] .rail-stage-line { color: var(--hold); }
+
+.rail-stage[data-phase="done"] .rail-stage-line,
+.rail-stage[data-phase="transcript_ready"] .rail-stage-line { color: var(--live); }
+
+.rail-stage[data-phase="idle"] .rail-stage-line,
+.rail-stage[data-phase="waiting"] .rail-stage-line { color: var(--text-dim); }
+
+/* --- the extraction batch bar -------------------------------------------- */
+
+.rail-batch {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.rail-batch-track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.rail-batch-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--hold);
+}
+
+.rail-batch-label {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* --- the live region ------------------------------------------------------
+ * The thing the whole rail exists for. It scrolls INSIDE itself so the rail can
+ * be sticky and the card feed can be long; board.js keeps it pinned to the
+ * newest row unless the viewer has scrolled up to read something.
+ */
+
+.rail-live {
+  display: flex;
+  flex-direction: column;
+  min-height: 132px;   /* the fold contract: the live region is never zero-height */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rail-live-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 14px 7px;
+  color: var(--text-dimmer);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.rail-live-count {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-live-source {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  /* 9.5px at 0.75 opacity measured 4.2:1 — under AA, and small enough that the
+   * word was a smudge rather than a fact. */
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+}
+
+.rail-feed {
+  margin: 0;
+  padding: 0 6px 8px;
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.rail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border-left: 2px solid transparent;
+  min-width: 0;
+}
+
+.rail-row + .rail-row { margin-top: 1px; }
+
+/* A TAG, NOT A TIMESTAMP COLUMN. Bare lowercase mono running down the left edge
+ * of a scrolling region is the visual grammar of a log file, and a log file is
+ * the one thing this panel must not look like — the argument it is making is
+ * "here is the system reasoning", not "here is stderr". A tinted, bounded tag
+ * beside a sentence reads as a labelled row. */
+.rail-chip {
+  flex: 0 0 auto;
+  align-self: center;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.rail-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.42;
+  letter-spacing: -0.003em;
+  overflow-wrap: anywhere;
+}
+
+/* TONE IS THE ARGUMENT. An `act` row and an `ignore` row have to be equally
+ * legible: the pitch is that the system decided NOT to do things, and a greyed
+ * refusal reads as a bug rather than as restraint. */
+.rail-row[data-tone="act"] { border-left-color: color-mix(in srgb, var(--live) 60%, transparent); }
+.rail-row[data-tone="act"] .rail-chip {
+  color: var(--live);
+  background: color-mix(in srgb, var(--live) 13%, transparent);
+}
+
+.rail-row[data-tone="hold"] { border-left-color: color-mix(in srgb, var(--hold) 60%, transparent); }
+.rail-row[data-tone="hold"] .rail-chip {
+  color: var(--hold);
+  background: color-mix(in srgb, var(--hold) 13%, transparent);
+}
+
+.rail-row[data-tone="ignore"] { border-left-color: var(--line-strong); }
+.rail-row[data-tone="ignore"] .rail-chip { color: var(--text-dimmer); }
+/* Restraint is the pitch, so a refusal is set in the same serif the card quotes
+ * use rather than greyed into the background. It is a decision, not a dropped
+ * line. */
+.rail-row[data-tone="ignore"] .rail-text {
+  color: var(--text-dimmer);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13.5px;
+}
+
+.rail-row[data-tone="decline"] { border-left-color: color-mix(in srgb, var(--fail) 60%, transparent); }
+.rail-row[data-tone="decline"] .rail-chip {
+  color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 13%, transparent);
+}
+
+.rail-row[data-stage="extraction"] .rail-text { color: var(--text); }
+
+.rail-idle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 22px;
+}
+
+.rail-pulse {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dimmer);
+}
+
+.rail-idle-line {
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14.5px;
+}
+
+.rail-privacy {
+  margin: 0;
+  padding: 9px 14px 11px;
+  border-top: 1px solid var(--line);
+  color: var(--text-dimmer);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* --- last adjourned (the never-blank open) -------------------------------- */
+
+.lastadj { margin-bottom: 18px; }
+
+.lastadj-when {
+  color: var(--text-dimmer);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.lastadj-body {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  padding: 14px 18px 12px;
+}
+
+.lastadj-title {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.lastadj-rows { margin: 0; padding: 0; list-style: none; }
+
+/* A GRID, NOT A FLEX ROW. Flexed, the summary and the trailing spacer both grew,
+ * so the leftover width split between them and the SIM badge landed at a
+ * different x on every row — three receipts, three badge positions, in the
+ * opening frame. Fixed tracks put the badges and the clocks in columns, which
+ * is what makes three rows read as a ledger rather than three sentences. */
+.lastadj-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 62px 76px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Explicit columns, because a memory-sourced row carries no mode badge and
+ * auto-placement would slide its clock one track left — the one row without a
+ * badge would be the one row whose clock does not line up. */
+.lastadj-row .chip-small { grid-column: 1; justify-self: start; }
+.lastadj-row .lastadj-summary { grid-column: 2; }
+.lastadj-row .badge { grid-column: 3; justify-self: start; }
+.lastadj-row .elapsed { grid-column: 4; justify-self: end; }
+/* The flex spacer has no job inside a grid and would claim a whole track. */
+.lastadj-row .spacer { display: none; }
+
+.lastadj-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+
+.lastadj-note {
+  margin: 10px 0 0;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* With receipts above it the pulse is a footnote, not the whole screen. */
+.empty-state.is-quiet { padding: 26px 0 34px; }
+.empty-state.is-quiet .empty-line { font-size: 17px; }
+
+/* The way onward out of an empty per-meeting board. Weighted like the control
+ * that got you here, so "nothing followed from this meeting" is a sentence and
+ * not a cul-de-sac. */
+.empty-onward {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border: 1px solid var(--text-dimmer);
+  border-radius: 10px;
+  background: var(--ink-raised-2);
+  color: var(--text);
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+.empty-onward:hover { border-color: var(--text); }
+.empty-onward:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
+.empty-onward-arrow { color: var(--text-dimmer); }
+
+/* PRESENTATION ZOOM. 175% on a 1512px window is an 864x514 CSS viewport. Keyed
+ * on viewport HEIGHT, so it only fires when the screen is short: a laptop at
+ * 100% is untouched. Below 1180px CSS pixels the rail is already stacked under
+ * the cards, so this block is about the header alone. */
 @media (max-height: 640px) {
-  .masthead { padding: 12px 0 10px; }
-  .masthead-inner { padding-bottom: 10px; }
-  .viewbar { margin: 8px auto 12px; }
-  .guts { margin-bottom: 14px; }
-  .guts-head { padding: 8px 16px; }
+  :root { --chrome-top: 74px; --rail-inset: 136px; }
+  .masthead { padding: 10px 0 8px; }
+  .masthead-inner { padding-bottom: 8px; }
+  .meeting-title { font-size: 22px; }
+  .viewbar { margin: 6px auto 10px; }
+  /* The 34px tab is right on a laptop and is nine pixels of the fold at 175%.
+   * The words and their contrast are untouched — only the padding around
+   * them — so the bar is still a bar you can read and hit. */
+  .viewlink { min-height: 28px; padding: 0 12px; font-size: 13px; }
+  .wordmark { min-height: 28px; font-size: 11px; margin-right: 8px; padding-right: 11px; }
+  /* Same trade on the countdown: the ring is the one thing on the board that is
+   * both large and decorative, and at 514px of height 56px of it costs a card. */
+  .ring-wrap { flex: 0 0 46px; width: 46px; height: 46px; }
+  .ring { width: 46px; height: 46px; }
+  .ring-label { font-size: 12px; }
+  .guts { margin-bottom: 12px; }
+  .guts-head { padding: 7px 14px 6px; }
+
+  /* THE STAGES GO TWO-UP AND THE LIVE REGION TAKES THE ROOM BACK. Stacked, the
+   * four stages ate 293px of a 514px screen and the live region was left with
+   * ninety pixels and not one whole row in them — a rail that shows no thinking
+   * is not a rail. Two-up they cost ~104px and the feed gets ~270. */
+  .rail-stages { display: grid; grid-template-columns: 1fr 1fr; }
+  .rail-stage { padding: 5px 10px; border-bottom: none; }
+  .rail-stage:nth-child(odd) { border-right: 1px solid var(--line); }
+  .rail-stage:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .rail-stage-line { font-size: 13px; }
+  /* The counts are already in the Executors headline; the badges are a second
+   * copy and the one thing here that can be dropped without losing a number. */
+  .rail-stage-badges { display: none; }
+  .rail-live-title { padding: 7px 14px 5px; }
+  .rail-live { min-height: 96px; }
+  .rail-row { padding: 3px 8px; }
+  /* The tag keeps its colour and loses its box: at 514px every row that fits is
+   * a row of thinking the room gets to see. */
+  .rail-chip { padding: 0; background: transparent; align-self: baseline; }
+  .rail-text { font-size: 11.5px; line-height: 1.28; }
+  .rail-row[data-tone="ignore"] .rail-text { font-size: 11.5px; }
+  .rail-privacy { padding: 6px 14px 7px; font-size: 9.5px; }
+
+  /* CARD DENSITY, NOT CARD SIZE. Every type size on a card is untouched — the
+   * whole reason for presenting at 175% is that the headline and the badges have
+   * to read from 1.5m. What comes out is the padding and the gaps around them,
+   * which buys a second whole card above the fold at 864x514. */
+  .card { margin-bottom: 8px; }
+  .card-body { padding: 10px 16px 9px; }
+  .card-top { margin-bottom: 7px; }
+  .quote { margin: 8px 0 0; }
+  .card-bottom { margin-top: 9px; }
+  .column { margin-bottom: 16px; }
+  .column-title { margin-bottom: 6px; }
+  .pending-row { gap: 14px; }
+}
+
+/* PRESENTATION ZOOM KEEPS THE RAIL BESIDE THE CARDS.
+ *
+ * 175% on a 1512x900 window is an 864x514 CSS viewport — below the 1180px the
+ * split layout normally needs, so the plain rule would stack the rail UNDER the
+ * card feed, which at 514px of height means the thing the presenter is narrating
+ * is off-screen entirely. A short viewport is a presenting viewport, so the
+ * split is forced back on and the rail is narrowed to 248px instead.
+ *
+ * Three cards do not fit in 514px at a legible card size and no layout can make
+ * them: measured at 864x514 the first card starts at 108px and the second ends
+ * at ~480px, so it is two cards and the whole live region. That is the honest
+ * ceiling at that zoom; 1512x900 is where the three-card number holds. */
+@media (max-height: 640px) and (min-width: 820px) {
+  :root { --rail-width: 248px; --rail-gap: 18px; }
+  .board-split {
+    max-width: calc(var(--page) + var(--rail-width) + var(--rail-gap));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rail-width);
+    gap: var(--rail-gap);
+    align-items: start;
+  }
+  .board-rail {
+    position: sticky;
+    top: var(--chrome-top);
+    max-height: calc(100vh - var(--rail-inset));
+    display: flex;
+  }
+  .guts { margin-bottom: 0; }
 }
 
 /* --- crosslinks (one meeting's page) ------------------------------------- */
 
+/* The ways out of one meeting's follow-through. Secondary to the cards — they
+ * are the page — but a row of 13px links under a 25px masthead read as a
+ * footnote, and one of them ("Transcript") is the trace the whole pitch turns
+ * on. Sized and spaced like navigation, still unfilled. */
 .crosslinks {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 18px;
   flex-wrap: wrap;
-  margin: 0 0 20px;
+  margin: 0 0 22px;
 }
+
+.crosslinks .link {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 14.5px;
+  color: var(--text-dim);
+  border-bottom-color: var(--line-strong);
+}
+
+.crosslinks .link:hover { color: var(--text); border-bottom-color: var(--text-dim); }
+.crosslinks .link:focus-visible { outline: 2px solid var(--text-dim); outline-offset: 3px; }
 
 /* A tab whose Blueprint did not mount. Present, named, and honestly dead. */
 .viewlink.is-down {
@@ -743,82 +1659,71 @@ body {
   letter-spacing: 0.04em;
 }
 
-.guts-stages {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-}
-
-.guts-stage {
-  padding: 12px 16px 14px;
-  border-right: 1px solid var(--line);
-  min-width: 0;
-}
-
-.guts-stage:last-child { border-right: none; }
-
-.guts-label {
-  margin: 0 0 6px;
-  color: var(--text-dimmer);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.guts-headline {
-  margin: 0;
-  color: var(--text);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.25;
-}
-
-.guts-detail {
-  margin: 6px 0 0;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1.4;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.guts-stage[data-phase="running"] .guts-headline,
-.guts-stage[data-phase="pending"] .guts-headline,
-.guts-stage[data-phase="meeting_stopped"] .guts-headline {
-  color: var(--hold);
-}
-
-.guts-stage[data-phase="done"] .guts-headline,
-.guts-stage[data-phase="transcript_ready"] .guts-headline {
-  color: var(--live);
-}
-
-.guts-stage[data-phase="waiting"] .guts-headline {
-  color: var(--text-dim);
-}
+/* --- rail motion ----------------------------------------------------------
+ * Every animation on the rail is opt-in inside this block, the same discipline
+ * the card animations follow, so prefers-reduced-motion has nothing to undo.
+ */
 
 @media (prefers-reduced-motion: no-preference) {
-  .guts-stage[data-phase="running"] .guts-headline,
-  .guts-stage[data-phase="waiting"] .guts-headline,
-  .guts-stage[data-phase="pending"] .guts-headline {
-    animation: guts-pulse 1.8s ease-in-out infinite;
+  /* A NEW LINE OF THINKING. board.js adds .is-new only to rows whose seq it has
+   * not seen, so the 1s fragment swap does not re-run twenty animations at once
+   * — only the row that actually just arrived moves. */
+  .rail-row.is-new {
+    animation: rail-row-in 220ms var(--ease-out) both;
   }
 
-  @keyframes guts-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.55; }
+  @keyframes rail-row-in {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: none; }
   }
-}
 
-@media (max-width: 720px) {
-  .guts-stages { grid-template-columns: 1fr 1fr; }
-  .guts-stage:nth-child(2) { border-right: none; }
-  .guts-stage:nth-child(1),
-  .guts-stage:nth-child(2) { border-bottom: 1px solid var(--line); }
+  /* The working stage breathes. Idle and done stages are still. */
+  .rail-stage[data-phase="running"] .rail-dot,
+  .rail-stage[data-phase="pending"] .rail-dot,
+  .rail-stage[data-phase="meeting_stopped"] .rail-dot {
+    animation: rail-dot-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes rail-dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hold) 45%, transparent); }
+    70%      { box-shadow: 0 0 0 7px rgba(232, 179, 57, 0); }
+  }
+
+  /* THE WORKING STAGE'S HEADLINE USED TO BLINK — a 1.8s opacity pulse straight
+   * across the words. It moved, which was the intent, at the cost of making the
+   * one line on the rail that is actually reporting something the hardest line
+   * on the rail to read; half the cycle it was at 55%. The stage's motion lives
+   * on the dot above and in the batch bar below, both of which are shapes rather
+   * than text. The sentence holds still and stays legible. */
+
+  /* THE BAR MOVES BETWEEN BATCHES. Extraction publishes batch N of M perhaps
+   * once every eight seconds, and in the ~25s gap after a meeting stops that is
+   * three updates — long enough, watched from a room, to look frozen. The fill
+   * carries a slow travelling highlight so the stage is visibly working in the
+   * seconds where nothing has changed yet. It never moves the WIDTH: the number
+   * of batches done is the fill's length and only extraction may set that. */
+  .rail-stage[data-phase="running"] .rail-batch-fill {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.45) 50%,
+      transparent 100%
+    );
+    background-size: 60% 100%;
+    background-repeat: no-repeat;
+    animation: rail-batch-sweep 1.6s linear infinite;
+  }
+
+  @keyframes rail-batch-sweep {
+    from { background-position: -70% 0; }
+    to   { background-position: 170% 0; }
+  }
+
+  /* The waiting pulse on an idle rail — the same grammar as the board's own
+   * empty state, so "listening" looks the same everywhere. */
+  .rail-pulse { animation: empty-pulse 2.6s ease-out infinite; }
+
+  .rail-batch-fill { transition: width 420ms var(--ease-out); }
 }
 
 /* --- narrow screens ------------------------------------------------------ */

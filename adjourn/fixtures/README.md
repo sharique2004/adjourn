@@ -19,7 +19,7 @@ Drift's `.jsonl`, extended to the segment shape `meetingscribe_source` produces 
 one `meta` line, then one line per segment:
 
 ```json
-{"type":"meta","meeting_id":"agi-living-room","title":"MMM Standup — living room","date":"2026-08-21"}
+{"type":"meta","meeting_id":"agi-living-room","title":"Adjourn standup — living room","date":"2026-08-21"}
 {"type":"segment","segment_id":"agi-s05","speaker":"Them","track":"system","start":14.3,"end":31.8,"text":"..."}
 ```
 

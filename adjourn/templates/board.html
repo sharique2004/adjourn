@@ -16,12 +16,23 @@
 #}
 {% macro shell_tabbar(current) -%}
 <nav class="viewbar" aria-label="Sections">
+  {# THE WORDMARK LIVES HERE, not in the page head. Four of the five tabs put
+     their own name in the masthead — "Live", "Meetings", "Ledger",
+     "Connections" — so on four screens out of five the product's name appeared
+     nowhere above the fold, and a stranger who looked up mid-demo had a page
+     that did not say what it was. It sits in the tab bar because that is the
+     one strip identical on every page, and it is styled to read as a mark
+     rather than a sixth tab. #}
+  <span class="wordmark">Adjourn</span>
+  {# LIVE IS FIRST. The order is the order of the sitting: you capture the
+     meeting, then you look at what this machine heard, then at what followed
+     from it. Meetings led the bar for one bad reason — it was built first. #}
   {% if meetings_mounted is defined and not meetings_mounted %}
-  <span class="viewlink is-down" title="the Meetings blueprint did not mount">Meetings</span>
   <span class="viewlink is-down" title="the Meetings blueprint did not mount">Live</span>
+  <span class="viewlink is-down" title="the Meetings blueprint did not mount">Meetings</span>
   {% else %}
-  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="/meetings/">Meetings</a>
   <a class="viewlink {{ 'is-current' if current == 'live' else '' }}" href="/meetings/live">Live</a>
+  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="/meetings/">Meetings</a>
   {% endif %}
   <a class="viewlink {{ 'is-current' if current in ('board', 'meeting') else '' }}" href="/">Follow-through</a>
   <a class="viewlink {{ 'is-current' if current == 'ledger' else '' }}" href="/ledger">Ledger</a>
@@ -62,9 +73,19 @@
 
     <h2 class="headline">{{ card.human_summary }}</h2>
 
+    {# THE TRACE. The quote is the evidence for the card, so it is a link back to
+       the transcript it came out of — the beat is "this is not a summary, here is
+       the line that caused it". When there is no meeting to open (a fabricated
+       demo row, or the Meetings blueprint did not mount) it stays plain text
+       rather than becoming a door onto a 404. #}
     {% if card.quote %}
     <blockquote class="quote">
+      {% if card.transcript_url %}
+      <a class="quote-text quote-trace" href="{{ card.transcript_url }}"
+         title="Read this line in the transcript">&ldquo;{{ card.quote }}&rdquo;<span class="quote-trace-mark" aria-hidden="true">&nbsp;&rarr;</span></a>
+      {% else %}
       <span class="quote-text">&ldquo;{{ card.quote }}&rdquo;</span>
+      {% endif %}
       {% if card.speaker %}<cite class="quote-speaker">{{ card.speaker }}</cite>{% endif %}
     </blockquote>
     {% endif %}
@@ -90,14 +111,18 @@
 {%- endmacro -%}
 
 {% macro countdown_ring(item) -%}
-{# stroke-dasharray is the full circumference (2πr, r=21 → 131.95); the offset is
-   rendered server-side so the ring is correct before JavaScript runs. #}
-<svg class="ring" viewBox="0 0 48 48" width="48" height="48" role="img"
+{# stroke-dasharray is the full circumference (2πr, r=25 → 157.08); the offset is
+   rendered server-side so the ring is correct before JavaScript runs.
+   board.js carries the same number — see RING_CIRCUMFERENCE.
+
+   56px rather than 48. This is the only clock on the board a person is asked to
+   READ a number off while it moves, and at 48 the number inside it was 12px. #}
+<svg class="ring" viewBox="0 0 56 56" width="56" height="56" role="img"
      aria-label="{{ item.seconds_remaining }} seconds until this sends">
-  <circle class="ring-track" cx="24" cy="24" r="21"></circle>
-  <circle class="ring-progress" cx="24" cy="24" r="21"
-          stroke-dasharray="131.95"
-          stroke-dashoffset="{{ (131.95 * (1 - item.fraction_remaining)) | round(2) }}"></circle>
+  <circle class="ring-track" cx="28" cy="28" r="25"></circle>
+  <circle class="ring-progress" cx="28" cy="28" r="25"
+          stroke-dasharray="157.08"
+          stroke-dashoffset="{{ (157.08 * (1 - item.fraction_remaining)) | round(2) }}"></circle>
 </svg>
 <span class="ring-label" data-countdown-label>{% if item.seconds_remaining > 0 %}{{ item.seconds_remaining }}s{% else %}now{% endif %}</span>
 {%- endmacro -%}
@@ -120,7 +145,12 @@
         <h2 class="headline">{{ item.human_preview }}</h2>
         {% if item.quote %}
         <blockquote class="quote">
+          {% if item.transcript_url %}
+          <a class="quote-text quote-trace" href="{{ item.transcript_url }}"
+             title="Read this line in the transcript">&ldquo;{{ item.quote }}&rdquo;<span class="quote-trace-mark" aria-hidden="true">&nbsp;&rarr;</span></a>
+          {% else %}
           <span class="quote-text">&ldquo;{{ item.quote }}&rdquo;</span>
+          {% endif %}
           {% if item.speaker %}<cite class="quote-speaker">{{ item.speaker }}</cite>{% endif %}
         </blockquote>
         {% endif %}
@@ -134,10 +164,35 @@
 </article>
 {%- endmacro -%}
 
+{#- THE PAGE HEAD IS ABOUT THE PAGE. The Ledger used to wear the board's
+    masthead, which meant a cross-meeting page opened under the title of one
+    meeting — and then said "across 4 meetings" two lines below it. Same shell,
+    same type scale, same three-part shape (name · facts · tagline); the facts
+    are the ledger's own. -#}
+{% macro ledger_header(ledger) -%}
+<div class="masthead-inner">
+  <div class="masthead-left">
+    <h1 class="meeting-title">Ledger</h1>
+    <p class="meeting-meta">
+      <span class="meta-item totals">{{ ledger.people | length }} {{ 'name' if ledger.people | length == 1 else 'names' }}</span>
+      <span class="meta-item totals">{{ ledger.commitment_count }} executed action{{ '' if ledger.commitment_count == 1 else 's' }}</span>
+      <span class="meta-item totals">{{ ledger.meeting_count }} meeting{{ '' if ledger.meeting_count == 1 else 's' }}</span>
+      {%- if ledger.from_last_meeting %}
+      <span class="meta-item totals">from the last meeting</span>
+      {%- endif %}
+    </p>
+  </div>
+  <p class="tagline">Who promised what.</p>
+</div>
+{%- endmacro -%}
+
 {% macro board_header(state) -%}
 <div class="masthead-inner">
   <div class="masthead-left">
-    <h1 class="meeting-title">{{ state.meeting.title or 'Adjourn' }}</h1>
+    {# THE MASTHEAD NEVER PRINTS A SLUG. display_title is the recording's own
+       title when it has one and a readable rendering of its id when it does
+       not; 'Adjourn' is the cold open, before any meeting has been named. #}
+    <h1 class="meeting-title">{{ state.meeting.display_title or state.meeting.title or 'Adjourn' }}</h1>
     <p class="meeting-meta">
       {% if state.meeting.duration %}<span class="meta-item">{{ state.meeting.duration }}</span>{% endif %}
       <span class="meta-item totals" data-totals>{{ state.totals_line }}</span>
@@ -147,26 +202,47 @@
   <p class="tagline">{{ quiet_header_line }}</p>
 </div>
 {%- endmacro -%}
-{%- macro guts_panel(pipeline) -%}
-{# Four stages of the spine, on the same page as the cards. A founder watching
-   this window — not MeetingScribe — can see extract → plan → execute happen.
+{%- macro rail_row(row) -%}
+{# One line of thinking. data-seq is what board.js animates on: a row whose seq it
+   has not seen before gets .is-new, everything else is left alone so the 1s
+   fragment swap does not re-run every animation on the rail. #}
+<li class="rail-row" data-seq="{{ row.seq }}" data-stage="{{ row.stage }}"
+    data-tone="{{ row.tone }}"{% if row.derived %} data-derived="1"{% endif %}>
+  <span class="rail-chip">{{ row.label }}</span>
+  <span class="rail-text">{{ row.text }}</span>
+</li>
+{%- endmacro -%}
 
-   COLLAPSED BY DEFAULT, AND THAT IS A MEASUREMENT, NOT A TASTE. The runbook
-   tells the presenter to zoom to 175%, which on a 1512px window is an 864x514
-   CSS viewport. The expanded four-column panel plus the masthead and tab bar
-   filled that entire first screen: the first EXECUTED card began at 497px
-   against a 514px fold, so the money card was four screens down and the runbook
-   was pointing at an empty spot. The summary row below keeps every live number
-   on screen — all four stage headlines, in ~44px instead of ~250px — and the
-   detail lines are one click away. board.js remembers whether you opened it, so
-   the 1s fragment swap never closes it under your hand. #}
+{%- macro guts_panel(pipeline) -%}
+{# THE RAIL. Four stages of the spine and a live log of what the spine is
+   thinking, standing beside the cards rather than above them.
+
+   IT USED TO BE A COLLAPSED ROW ACROSS THE TOP, and that was a measurement:
+   expanded, the four-column panel plus the masthead and tab bar filled the whole
+   first screen and pushed the money card below the fold. Collapsing it fixed the
+   fold and cost the demo its best asset — nobody could watch the system think.
+
+   Moving it to the right-hand column fixes both at once. It takes no vertical
+   space above the cards, so the fold measurement improves rather than
+   regresses (header + tabs, ~133px, measured at 1512x900), and it can be
+   permanently open because it is not competing with the cards for height. It is
+   sticky, so it stays on screen while the card feed scrolls under it.
+
+   The live region is the point. Its rows come from pipeline.json's `feed` when
+   the orchestrator writes one (per-statement, per-decision, per-fire — see
+   scratchpad/pipeline-feed-spec.md); when it does not, the board DERIVES a
+   coarser feed from the counters and the journal, marks those rows
+   data-derived, and the rail still moves through a run. #}
 {% set pipeline = pipeline or {} %}
 {% set watcher = pipeline.watcher or {} %}
 {% set extraction = pipeline.extraction or {} %}
 {% set planner = pipeline.planner or {} %}
 {% set executors = pipeline.executors or {} %}
-<details class="guts" data-mode="{{ pipeline.mode or 'idle' }}" data-guts-details>
-  <summary class="guts-head">
+{% set feed = pipeline.feed or [] %}
+<section class="guts" data-mode="{{ pipeline.mode or 'idle' }}" data-guts-rail
+         data-feed-source="{{ pipeline.feed_source or 'derived' }}"
+         data-feed-seq="{{ pipeline.feed_seq or 0 }}">
+  <header class="guts-head">
     <h2 class="guts-title">Pipeline</h2>
     {% if pipeline.mode == 'replay' %}
       <span class="badge badge-sim">REPLAY</span>
@@ -176,39 +252,41 @@
     {% if pipeline.pass_name %}
       <span class="guts-pass">{{ pipeline.pass_name }}</span>
     {% endif %}
-    <span class="guts-strip">
-      <span class="guts-chip" data-phase="{{ watcher.phase or 'waiting' }}">
-        <span class="guts-chip-label">Watcher</span>{{ watcher.headline or 'waiting' }}</span>
-      <span class="guts-chip" data-phase="{{ extraction.phase or 'idle' }}">
-        <span class="guts-chip-label">Extraction</span>{{ extraction.headline or 'idle' }}</span>
-      <span class="guts-chip" data-phase="{{ planner.phase or 'idle' }}">
-        <span class="guts-chip-label">Planner</span>{{ planner.headline or 'idle' }}</span>
-      <span class="guts-chip" data-phase="{{ executors.phase or 'idle' }}">
-        <span class="guts-chip-label">Executors</span>{{ executors.headline or 'idle' }}</span>
-    </span>
-    <span class="spacer"></span>
-    <span class="guts-toggle" aria-hidden="true">details</span>
-  </summary>
-  <div class="guts-stages">
-    <article class="guts-stage" data-stage="watcher" data-phase="{{ watcher.phase or 'waiting' }}">
-      <h3 class="guts-label">Watcher</h3>
-      <p class="guts-headline">{{ watcher.headline or 'waiting' }}</p>
-      <p class="guts-detail">{{ watcher.detail or 'waiting for a meeting to end' }}</p>
-    </article>
-    <article class="guts-stage" data-stage="extraction" data-phase="{{ extraction.phase or 'idle' }}">
-      <h3 class="guts-label">Extraction</h3>
-      <p class="guts-headline">{{ extraction.headline or 'idle' }}</p>
-      <p class="guts-detail">{{ extraction.detail or 'idle' }}</p>
-    </article>
-    <article class="guts-stage" data-stage="planner" data-phase="{{ planner.phase or 'idle' }}">
-      <h3 class="guts-label">Planner</h3>
-      <p class="guts-headline">{{ planner.headline or 'idle' }}</p>
-      <p class="guts-detail">{{ planner.detail or 'idle' }}</p>
-    </article>
-    <article class="guts-stage" data-stage="executors" data-phase="{{ executors.phase or 'idle' }}">
-      <h3 class="guts-label">Executors</h3>
-      <p class="guts-headline">{{ executors.headline or 'idle' }}</p>
-      <p class="guts-detail">
+  </header>
+
+  <ol class="rail-stages">
+    <li class="rail-stage" data-stage="watcher" data-phase="{{ watcher.phase or 'waiting' }}">
+      <span class="rail-dot" aria-hidden="true"></span>
+      <span class="rail-stage-name">Watcher</span>
+      <span class="rail-stage-line">{{ watcher.headline or 'waiting' }}</span>
+    </li>
+    <li class="rail-stage" data-stage="extraction" data-phase="{{ extraction.phase or 'idle' }}">
+      <span class="rail-dot" aria-hidden="true"></span>
+      <span class="rail-stage-name">Extraction</span>
+      <span class="rail-stage-line">{{ extraction.headline or 'idle' }}</span>
+      {# The batch bar renders ONLY when the orchestrator reports a batch total.
+         A bar with nothing behind it is a progress bar that lies. #}
+      {% if extraction.batch_total %}
+      <span class="rail-batch" data-batch role="img"
+            aria-label="{{ extraction.batch_line }}">
+        <span class="rail-batch-track">
+          <span class="rail-batch-fill"
+                style="width: {{ (extraction.batch_fraction * 100) | round(1) }}%"></span>
+        </span>
+        <span class="rail-batch-label">{{ extraction.batch_line }}</span>
+      </span>
+      {% endif %}
+    </li>
+    <li class="rail-stage" data-stage="planner" data-phase="{{ planner.phase or 'idle' }}">
+      <span class="rail-dot" aria-hidden="true"></span>
+      <span class="rail-stage-name">Planner</span>
+      <span class="rail-stage-line">{{ planner.headline or 'idle' }}</span>
+    </li>
+    <li class="rail-stage" data-stage="executors" data-phase="{{ executors.phase or 'idle' }}">
+      <span class="rail-dot" aria-hidden="true"></span>
+      <span class="rail-stage-name">Executors</span>
+      <span class="rail-stage-line">{{ executors.headline or 'idle' }}</span>
+      <span class="rail-stage-badges">
         {% if executors.fired_live %}
           <span class="badge badge-live"><span class="dot"></span>LIVE {{ executors.fired_live }}</span>
         {% endif %}
@@ -221,13 +299,63 @@
         {% if executors.cancelled %}
           <span class="badge badge-undone">CANCELLED {{ executors.cancelled }}</span>
         {% endif %}
-        {% if not executors.fired_live and not executors.fired_sim and not executors.pending and not executors.cancelled %}
-          {{ executors.detail or 'nothing fired yet' }}
-        {% endif %}
-      </p>
-    </article>
+      </span>
+    </li>
+  </ol>
+
+  <div class="rail-live" data-rail-live>
+    <h3 class="rail-live-title">
+      Thinking
+      <span class="rail-live-count">{{ feed | length }}</span>
+      <span class="spacer"></span>
+      {% if pipeline.feed_source == 'orchestrator' %}
+        <span class="rail-live-source" title="streamed by the orchestrator">stream</span>
+      {% else %}
+        <span class="rail-live-source" title="composed by the board from pipeline.json and the journal">derived</span>
+      {% endif %}
+    </h3>
+    {% if feed %}
+    <ol class="rail-feed" data-rail-feed>
+      {% for row in feed %}{{ rail_row(row) }}{% endfor %}
+    </ol>
+    {% else %}
+    <div class="rail-idle" data-rail-feed>
+      <span class="rail-pulse" aria-hidden="true"></span>
+      <p class="rail-idle-line">Listening. Nothing to decide yet.</p>
+    </div>
+    {% endif %}
   </div>
-</details>
+
+  <p class="rail-privacy">{{ privacy_line }}</p>
+</section>
+{%- endmacro -%}
+
+{%- macro last_adjourned_panel(last) -%}
+{# NEVER-BLANK OPEN. The receipts of the last meeting this machine worked, under a
+   quiet header, so that opening the board always shows a system that has done
+   work. Nothing here is fabricated: `source_note` names the file or the backend
+   every row came out of. #}
+<section class="lastadj" aria-label="What Adjourn did last time">
+  <h2 class="column-title">
+    Last adjourned
+    {% if last.when %}<span class="lastadj-when">{{ last.when }}</span>{% endif %}
+  </h2>
+  <div class="lastadj-body">
+    <p class="lastadj-title">{{ last.title }}</p>
+    <ol class="lastadj-rows">
+      {% for row in last.rows %}
+      <li class="lastadj-row" data-kind="{{ row.kind }}">
+        <span class="chip chip-small">{{ row.label }}</span>
+        <span class="lastadj-summary">{{ row.summary }}</span>
+        {% if row.mode %}{{ mode_badge(row.mode) }}{% endif %}
+        <span class="spacer"></span>
+        {% if row.clock %}<span class="elapsed">{{ row.clock }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    <p class="lastadj-note">{{ last.count }} receipt{{ '' if last.count == 1 else 's' }} · {{ last.source_note }}</p>
+  </div>
+</section>
 {%- endmacro -%}
 
 {% macro pending_column(pending) -%}
@@ -239,14 +367,25 @@
 {% endif %}
 {%- endmacro -%}
 
-{% macro card_column(cards) -%}
+{% macro card_column(cards, last_adjourned=none) -%}
 {% if cards %}
 <section class="column column-done" aria-label="Actions Adjourn has executed">
-  <h2 class="column-title">Executed <span class="column-count">{{ cards | length }}</span></h2>
+  {# The count is of things that RAN. A cancelled card sits in this column so the
+     regret window leaves a receipt, but it never fired — counting it here made
+     the heading say "Executed 10" over a masthead reading "9 actions · 1
+     cancelled", on a board whose whole argument is that the numbers are true.
+     summarize_cards() already draws the same line (board_server.py). #}
+  <h2 class="column-title">Executed
+    <span class="column-count">{{ cards | rejectattr('state', 'equalto', 'cancelled') | list | length }}</span>
+  </h2>
   {% for card in cards %}{{ action_card(card) }}{% endfor %}
 </section>
 {% else %}
-<section class="empty-state" aria-label="No actions yet">
+{# An idle board is not a blank board. The last meeting's receipts go first — the
+   waiting pulse below them says the system is listening, not that it has never
+   done anything. #}
+{% if last_adjourned %}{{ last_adjourned_panel(last_adjourned) }}{% endif %}
+<section class="empty-state{{ ' is-quiet' if last_adjourned else '' }}" aria-label="No actions yet">
   <span class="empty-pulse" aria-hidden="true"></span>
   <p class="empty-line">{{ empty_state_line }}</p>
 </section>
@@ -259,18 +398,21 @@
     <span class="avatar" aria-hidden="true">{{ person.initials }}</span>
     <div class="person-id">
       <h2 class="person-name">{{ person.speaker }}</h2>
+      {# The two headings that are not a person say so, once, quietly. #}
+      {% if person.role_note %}<p class="person-role">{{ person.role_note }}</p>{% endif %}
       <p class="person-meta">
-        {{ person.total }} commitment{{ '' if person.total == 1 else 's' }}
-        · {{ person.meeting_count }} meeting{{ '' if person.meeting_count == 1 else 's' }}
-        · {{ person.live }} live · {{ person.sim }} sim
-        {%- if person.undone %} · {{ person.undone }} undone{% endif %}
-        {%- if person.failed %} · {{ person.failed }} failed{% endif %}
+        <span class="person-count">{{ person.total }}</span> commitment{{ '' if person.total == 1 else 's' }}
+        · <span class="person-count">{{ person.meeting_count }}</span> meeting{{ '' if person.meeting_count == 1 else 's' }}
+        · <span class="person-count">{{ person.live }}</span> live
+        · <span class="person-count">{{ person.sim }}</span> sim
+        {%- if person.undone %} · <span class="person-count">{{ person.undone }}</span> undone{% endif %}
+        {%- if person.failed %} · <span class="person-count">{{ person.failed }}</span> failed{% endif %}
       </p>
     </div>
     <span class="spacer"></span>
     <span class="kind-tally">
       {% for entry in person.kinds %}
-      <span class="tally" data-kind="{{ entry.kind }}" title="{{ entry.label }}">{{ entry.label }} {{ entry.count }}</span>
+      <span class="tally" data-kind="{{ entry.kind }}" title="{{ entry.label }}">{{ entry.label }}<span class="tally-count">{{ entry.count }}</span></span>
       {% endfor %}
     </span>
   </header>
@@ -305,23 +447,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% if view == 'ledger' %}Ledger · Adjourn{% elif state.meeting.title %}{{ state.meeting.title }} · Adjourn{% else %}Adjourn{% endif %}</title>
+  <title>{% if view == 'ledger' %}Ledger · Adjourn{% elif state.meeting.display_title %}{{ state.meeting.display_title }} · Adjourn{% else %}Adjourn{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
 </head>
 <body data-view="{{ view }}" data-version="{{ version }}" data-undo-token="{{ undo_token }}">
 
 <header class="masthead" data-header>
-  {{ board_header(state) }}
+  {% if view == 'ledger' %}{{ ledger_header(ledger) }}{% else %}{{ board_header(state) }}{% endif %}
 </header>
 
 {{ shell_tabbar(view) }}
 
 {% if view == 'ledger' %}
 <main class="ledger" id="ledger">
+  {# The counts moved up into the masthead, where every other tab keeps its
+     facts. What is left here is the one thing the counts do not say: this is the
+     journal's own record, and nothing on the page is inferred. #}
+  {# The lede describes rows. With no rows it was a sentence pointing at bare
+     ink — "Every commitment below was executed and written down" directly above
+     "No commitments on the books yet." The empty state says the true thing on
+     its own. #}
+  {% if ledger.people %}
   <p class="ledger-lede">
-    Who promised what, across {{ ledger.meeting_count }} meeting{{ '' if ledger.meeting_count == 1 else 's' }}
-    and {{ ledger.commitment_count }} executed action{{ '' if ledger.commitment_count == 1 else 's' }}.
+    Every commitment below was executed and written down. The quote is the line it came from.
   </p>
+  {% endif %}
   {% if ledger.memory.note %}<p class="source-note">{{ ledger.memory.note }}</p>{% endif %}
   {% if ledger.people %}
     {% for person in ledger.people %}{{ ledger_person(person) }}{% endfor %}
@@ -333,10 +483,17 @@
   {% endif %}
 </main>
 {% else %}
-<div id="guts" data-guts>{{ guts_panel(state.pipeline) }}</div>
-<main class="board">
-  <div id="pending">{{ pending_column(state.pending) }}</div>
-  <div id="cards">{{ card_column(state.cards) }}</div>
+{# THE FOLD. Cards left, rail right. The rail costs the card column ZERO vertical
+   pixels, which is what lets the first three cards and the rail's live region
+   share the first screen at 1512x900 — measured, see static/board.css. #}
+<main class="board board-split">
+  <div class="board-cards">
+    <div id="pending">{{ pending_column(state.pending) }}</div>
+    <div id="cards">{{ card_column(state.cards, state.last_adjourned) }}</div>
+  </div>
+  <aside class="board-rail" id="guts" data-guts aria-label="What the pipeline is doing">
+    {{ guts_panel(state.pipeline) }}
+  </aside>
 </main>
 {% endif %}
 
@@ -346,6 +503,8 @@
   <span>Adjourn</span>
   <span class="dot-sep">·</span>
   <span>local-first · deterministic core · model only at the edges</span>
+  <span class="dot-sep">·</span>
+  <span class="footfall-privacy">{{ privacy_line }}</span>
 </footer>
 
 <script src="{{ url_for('static', filename='board.js') }}" defer></script>

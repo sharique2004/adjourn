@@ -2,7 +2,7 @@
   "_comment": "Ground truth for agi-living-room.jsonl, hand-written. This is THE demo meeting: eleven statements covering all ten statement kinds, and between them every one of the eight action kinds. Loaded verbatim by extraction.load_fixture_statements('agi-living-room') when no engine is available — the floor under the demo. Also the scoring target for tests/test_understanding_extraction.py.",
   "meeting": {
     "meeting_id": "agi-living-room",
-    "title": "MMM Standup — living room",
+    "title": "Adjourn standup — living room",
     "date": "2026-08-21"
   },
   "statements": [
@@ -130,6 +130,24 @@
       "quote": "Perfect. Let's review Friday, both of us, and see where the cache actually landed.",
       "source": "final",
       "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s32",
+      "speaker": "You",
+      "topic": "join button",
+      "claim": "The join button on PR #6 should use the team's slate blue #6b7f99 instead of the green it currently ships.",
+      "kind": "decision",
+      "entity_refs": {
+        "issue_number": 6,
+        "person": "Priya",
+        "pr_topic": "join button",
+        "new_value": "#6b7f99"
+      },
+      "quote": "Yeah, the copy's fine. But on Priya's join button PR — pull six — that green is wrong. It should be our slate blue, six B seven F nine nine.",
+      "source": "final",
+      "engine": "fixtures",
+      "_comment": "THE PR-REVIEW BEAT, merged in from pr-review-beat.fixtures.json so one bare `--replay` shows every action kind the product has. Kept byte-identical to that file's statement on purpose: the two fixtures must not drift, and adjourn.tools.seed_demo_world.sync_fixtures rewrites the number in BOTH whenever the prop PR is rebuilt. Do not hand-edit the number. kind is 'decision' because ROUTING_TABLE maps decision -> (pr_review_suggestion, github_update) and SUPPRESSED_BY then drops the comment in favour of the inline suggestion — so this beat lands on the diff, not on the conversation tab. Both entity_refs are spoken IN agi-s32: 'pull six' gives issue_number (GitHub numbers PRs and issues in one space), 'Priya's' gives person. old_value is deliberately absent — '#2ecc71' is nowhere in the transcript; pr_review_suggestion_executor.derive_old_value reads it out of the PR's own diff. See fixtures/PR_REVIEW_PROP.md.",
+      "_beat_guard": "agi-s35 — 'she can turn that around before Friday' — must produce NOTHING. It is somebody else's unpromised work sized by a modal, and prompt rule 3b(d) plus NEVER STRENGTHEN A MODAL are what keep it off the calendar. tools/replay_check.py asserts the exact action set for this meeting."
     }
   ]
 }

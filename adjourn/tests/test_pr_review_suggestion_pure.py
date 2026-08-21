@@ -30,8 +30,12 @@ import os
 # variable, so this holds even though adjourn/.env ships ADJOURN_SIM=0.
 os.environ["ADJOURN_SIM"] = "1"
 os.environ["ADJOURN_LIVE_KINDS"] = ""
+# Deliberately set to a value that USED to arm a direct-commit path, so that the
+# inversion section at the bottom can prove the setting is inert: the capability
+# was deleted, not defaulted off, and nothing in the tree reads this name.
+os.environ["ADJOURN_PR_AUTOCOMMIT_BRANCHES"] = "priya/join-button"
 
-from adjourn import results  # noqa: E402
+from adjourn import config, results  # noqa: E402
 from adjourn.executors import pr_review_suggestion_executor as executor  # noqa: E402
 from adjourn.planner import Action  # noqa: E402
 
@@ -418,6 +422,86 @@ check(
     )
     is False,
 )
+
+
+print("\n== THE COMMIT PATH DOES NOT EXIST (inversion — it must never come back) ==")
+# This section is the guard on brief §6 and the out-of-scope line "do not
+# auto-commit from meetings". It asserts ABSENCE, because a test that exercises
+# a commit path is a test that keeps one alive. The env var below is set to the
+# demo prop's own branch at the top of this file: if anybody re-introduces the
+# feature, these checks fail rather than quietly start passing on a new path.
+
+import inspect  # noqa: E402
+
+source = inspect.getsource(executor)
+
+for symbol in (
+    "branch_opts_into_autocommit",
+    "NEVER_AUTOCOMMIT_BRANCHES",
+    "COMMIT_MESSAGE_PREFIX",
+    "apply_line_change",
+    "build_commit_message",
+    "build_commit_review_request",
+    "build_committed_comment_body",
+    "build_committed_review_body",
+    "summarize_commit",
+    "_commit_and_receipt",
+    "_commit_file_live",
+    "_read_file_at_ref_live",
+    "_undo_commit_and_review",
+):
+    check(f"executor exposes no {symbol}", not hasattr(executor, symbol))
+
+check("config exposes no pr_autocommit_branches",
+      not hasattr(config, "pr_autocommit_branches"))
+check("the executor never reads ADJOURN_PR_AUTOCOMMIT_BRANCHES",
+      "ADJOURN_PR_AUTOCOMMIT_BRANCHES" not in source)
+check("the executor names no contents endpoint (the one-file commit API)",
+      "/contents/" not in source, "a contents path survived the deletion")
+# The ONE surviving PUT is undo blanking a review body before deleting its
+# comment — the reversal, not a write to anybody's code. Pin it by shape so a
+# second PUT (to a file, to a branch) cannot slip in unremarked.
+put_lines = [line.strip() for line in source.splitlines() if '"PUT"' in line]
+check("exactly one PUT survives in the module", len(put_lines) == 1, str(put_lines))
+check("...and it targets a review, not a file",
+      put_lines and "/reviews/" in put_lines[0] and "contents" not in put_lines[0],
+      str(put_lines))
+
+# The demo prop PR #6 is on priya/join-button — the exact branch that used to be
+# opted in. It must come back a SUGGESTION.
+network_calls.clear()
+result = executor.execute(make_action(dict(BASE_PAYLOAD)))
+check("the prop branch's action still succeeds", result.ok, result.human_summary)
+check("...badged SIM", result.mode == results.MODE_SIM, result.mode)
+check("...and the summary SUGGESTS, never commits",
+      result.human_summary.startswith("Suggested change on PR #22:"),
+      result.human_summary)
+check("...the summary contains no commit language",
+      "ommitted" not in result.human_summary, result.human_summary)
+rendered = result.undo_payload["payload"]
+check("the rendered request is a REVIEW post, not a contents PUT",
+      rendered["endpoint"].endswith("/reviews") and rendered["method"] == "POST",
+      f"{rendered['method']} {rendered['endpoint']}")
+check("nothing in the rendered request targets a branch",
+      "branch" not in rendered, str(rendered.keys()))
+body = rendered["body"]["comments"][0]["body"]
+check("the inline comment carries a suggestion block", "```suggestion" in body)
+check("...and states plainly that nothing was pushed",
+      "nothing was pushed" in body, body)
+check("the undo payload is a review undo, not a commit undo",
+      result.undo_payload.get("kind", executor.ACTION_KIND) is not None
+      and "commit_sha" not in str(result.undo_payload), str(result.undo_payload)[:200])
+
+
+print("\n== the suggestion path still says nothing was pushed ==")
+suggested = executor.execute(make_action(dict(BASE_PAYLOAD)))
+suggestion_body = suggested.undo_payload["payload"]["body"]["comments"][0]["body"]
+check("the suggestion block is back", "```suggestion" in suggestion_body)
+check("...and it still says nothing was pushed", "nothing was pushed" in suggestion_body)
+check("...with the precise privacy line, not the absolute one",
+      "transcript never left this machine" not in suggestion_body
+      and "the sentence quoted above is the only text that travelled" in suggestion_body,
+      suggestion_body)
 
 
 print("\n== no `gh` at all: placeholders, clearly marked, never fiction ==")

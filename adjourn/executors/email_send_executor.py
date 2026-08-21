@@ -408,7 +408,12 @@ def _render_simulated(action: Action, preview: dict) -> results.ExecutorResult:
     """Sim mode: the exact email that would have been sent, unsent."""
     note = "(simulated)"
     if names_a_placeholder_address(preview.get("to")):
-        note = "(simulated — placeholder address, set ADJOURN_ADDRESS_BOOK)"
+        # The disclosure stays — a placeholder address is exactly the thing a
+        # viewer must be told about. The CONFIG VARIABLE does not: this string is
+        # rendered on a card and in the ledger, and an env-var name there is
+        # operator instruction leaking into product copy. The operator learns
+        # what to set from the planner's log line and from Connections.
+        note = "(simulated — no address on file)"
     return results.ExecutorResult.simulated(
         ACTION_KIND,
         f"Would email {preview['to']} — {preview['subject']} {note}",

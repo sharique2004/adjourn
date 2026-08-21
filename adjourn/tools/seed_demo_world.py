@@ -71,6 +71,11 @@ from .github_world import (
 FIXTURES_DIR = config.FIXTURES_DIR
 BEAT_TRANSCRIPT = FIXTURES_DIR / "pr-review-beat.jsonl"
 BEAT_GROUND_TRUTH = FIXTURES_DIR / "pr-review-beat.fixtures.json"
+# The demo meeting, which now carries the same beat — one bare `--replay` has to
+# show the inline suggestion alongside every other kind, so the number lives here
+# too and this script keeps both copies honest.
+DEMO_TRANSCRIPT = FIXTURES_DIR / "agi-living-room.jsonl"
+DEMO_GROUND_TRUTH = FIXTURES_DIR / "agi-living-room.fixtures.json"
 PROP_DOC = FIXTURES_DIR / "PR_REVIEW_PROP.md"
 
 # --- the roadmap ------------------------------------------------------------
@@ -402,63 +407,133 @@ def build_prop(repo: str, *, dry_run: bool) -> tuple[list[str], int | None]:
 # --- fixture sync -----------------------------------------------------------
 
 
-def sync_fixtures(repo: str, pr_number: int, *, dry_run: bool) -> list[str]:
-    """Point the transcript, the ground truth and the prop doc at the real PR.
-
-    Three files, one number, and they have to agree. The spoken form matters as
-    much as the digits: `prb-s05` is a record of a sentence, and the `quote` in
-    the ground truth must stay byte-identical to it, so both are rewritten from
-    the same string.
-    """
-    spoken = spoken_number(pr_number)
-    log: list[str] = []
-
-    # The transcript is JSONL. Parse it to find the spoken line rather than
-    # pattern-matching raw bytes, then splice the NEW text in by replacing the
-    # old text's JSON encoding — so the file keeps its exact formatting and only
-    # the sentence changes.
-    transcript = BEAT_TRANSCRIPT.read_text(encoding="utf-8")
-    spoken_phrase = f"pull {spoken}"
-    old_text = new_text = ""
-    for line in transcript.splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if row.get("segment_id") == "prb-s05":
-            old_text = str(row.get("text", ""))
-            new_text = re.sub(r"pull [a-z\-]+(?= — that green)", spoken_phrase, old_text)
-            break
-    if not old_text:
-        raise WorldError("could not find segment prb-s05 in the transcript fixture")
-    if spoken_phrase not in new_text:
-        raise WorldError(
-            f"prb-s05 does not contain a spoken pull-request number to rewrite: {old_text!r}"
-        )
-    transcript_out = transcript.replace(
-        json.dumps(old_text, ensure_ascii=False)[1:-1],
-        json.dumps(new_text, ensure_ascii=False)[1:-1],
-    )
-    quote = new_text
-
-    ground_truth = BEAT_GROUND_TRUTH.read_text(encoding="utf-8")
-    ground_truth_out = ground_truth
+def _rewrite_pr_number(text: str, repo: str, pr_number: int, quote: str) -> str:
+    """Every spelling of the prop's number, inside one slice of one file. Pure."""
     # A lambda replacement, because the quote contains characters (backslashes,
     # in principle) that re.sub would read as group references in a template.
-    ground_truth_out = re.sub(
-        r'"quote": ".*?"',
-        lambda _m: f'"quote": {json.dumps(quote, ensure_ascii=False)}',
-        ground_truth_out, count=1)
-    ground_truth_out = re.sub(r'"issue_number": \d+', f'"issue_number": {pr_number}',
-                              ground_truth_out)
-    ground_truth_out = re.sub(r'"pr_number": \d+', f'"pr_number": {pr_number}',
-                              ground_truth_out)
-    ground_truth_out = re.sub(r"PR #\d+", f"PR #{pr_number}", ground_truth_out)
-    ground_truth_out = re.sub(
-        r"https://github\.com/[\w\-]+/[\w\-]+/pull/\d+",
-        f"https://github.com/{repo}/pull/{pr_number}", ground_truth_out)
-    ground_truth_out = re.sub(r"[\w\-]+/[\w\-]+#\d+", f"{repo}#{pr_number}",
-                              ground_truth_out)
+    text = re.sub(r'"quote": ".*?"',
+                  lambda _m: f'"quote": {json.dumps(quote, ensure_ascii=False)}',
+                  text, count=1)
+    text = re.sub(r'"issue_number": \d+', f'"issue_number": {pr_number}', text)
+    text = re.sub(r'"pr_number": \d+', f'"pr_number": {pr_number}', text)
+    text = re.sub(r"PR #\d+", f"PR #{pr_number}", text)
+    text = re.sub(r"https://github\.com/[\w\-]+/[\w\-]+/pull/\d+",
+                  f"https://github.com/{repo}/pull/{pr_number}", text)
+    text = re.sub(r"[\w\-]+/[\w\-]+#\d+", f"{repo}#{pr_number}", text)
+    return text
+
+
+def _statement_span(document: str, segment_id: str) -> tuple[int, int]:
+    """(start, end) of the JSON object holding `segment_id`, by brace matching.
+
+    NEEDED BECAUSE THE BEAT NOW LIVES IN TWO FIXTURES. pr-review-beat.fixtures
+    .json holds exactly one statement, so a whole-file rewrite of every
+    `"issue_number": N` was safe there. agi-living-room.fixtures.json holds
+    twelve, and one of them is the Redis decision on issue #2 — a whole-file
+    rewrite would renumber THAT to the pull request and point the demo's opening
+    comment at a PR. So the rewrite is scoped to the one object.
+    """
+    marker = document.find(f'"segment_id": "{segment_id}"')
+    if marker < 0:
+        raise WorldError(f"could not find statement {segment_id!r} in the ground truth")
+    start = document.rfind("{", 0, marker)
+    if start < 0:
+        raise WorldError(f"{segment_id!r} is not inside a JSON object")
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(document)):
+        character = document[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return start, index + 1
+    raise WorldError(f"the object holding {segment_id!r} is not closed")
+
+
+# The PR-review beat lives in TWO transcripts: its own, and the demo meeting it
+# was merged into so one bare `--replay` shows every action kind. Both say "pull
+# six" out loud and both have a ground truth whose `quote` must stay byte-identical
+# to the spoken line — so both are rewritten from the same string, or they drift
+# and the beat silently mis-targets in exactly one of them.
+#
+# `scope` says how much of the ground-truth file the number rewrite may touch:
+#   "file"      — the file is about this beat and nothing else (pr-review-beat)
+#   "statement" — rewrite only the one statement object (agi-living-room, whose
+#                 other statements carry real issue numbers of their own)
+BEAT_FIXTURES: tuple[tuple[Path, str, Path, str, str], ...] = (
+    (BEAT_TRANSCRIPT, "prb-s05", BEAT_GROUND_TRUTH, "prb-s05", "file"),
+    (DEMO_TRANSCRIPT, "agi-s32", DEMO_GROUND_TRUTH, "agi-s32", "statement"),
+)
+
+
+def sync_fixtures(repo: str, pr_number: int, *, dry_run: bool) -> list[str]:
+    """Point every transcript, ground truth and the prop doc at the real PR.
+
+    Five files, one number, and they all have to agree. The spoken form matters
+    as much as the digits: the transcript segments are records of a sentence, and
+    each ground truth's `quote` must stay byte-identical to its own, so both are
+    rewritten from the same string.
+    """
+    spoken = spoken_number(pr_number)
+    spoken_phrase = f"pull {spoken}"
+    log: list[str] = []
+    changes: list[tuple[Path, str, str]] = []
+
+    for transcript_path, transcript_segment, truth_path, truth_segment, scope in BEAT_FIXTURES:
+        # The transcript is JSONL. Parse it to find the spoken line rather than
+        # pattern-matching raw bytes, then splice the NEW text in by replacing
+        # the old text's JSON encoding — so the file keeps its exact formatting
+        # and only the sentence changes.
+        transcript = transcript_path.read_text(encoding="utf-8")
+        old_text = new_text = ""
+        for line in transcript.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("segment_id") == transcript_segment:
+                old_text = str(row.get("text", ""))
+                new_text = re.sub(r"pull [a-z\-]+(?= — that green)", spoken_phrase, old_text)
+                break
+        if not old_text:
+            raise WorldError(
+                f"could not find segment {transcript_segment} in {transcript_path.name}"
+            )
+        if spoken_phrase not in new_text:
+            raise WorldError(
+                f"{transcript_segment} does not contain a spoken pull-request number "
+                f"to rewrite: {old_text!r}"
+            )
+        transcript_out = transcript.replace(
+            json.dumps(old_text, ensure_ascii=False)[1:-1],
+            json.dumps(new_text, ensure_ascii=False)[1:-1],
+        )
+        changes.append((transcript_path, transcript, transcript_out))
+
+        ground_truth = truth_path.read_text(encoding="utf-8")
+        if scope == "file":
+            ground_truth_out = _rewrite_pr_number(ground_truth, repo, pr_number, new_text)
+        else:
+            start, end = _statement_span(ground_truth, truth_segment)
+            ground_truth_out = (
+                ground_truth[:start]
+                + _rewrite_pr_number(ground_truth[start:end], repo, pr_number, new_text)
+                + ground_truth[end:]
+            )
+        changes.append((truth_path, ground_truth, ground_truth_out))
 
     doc = PROP_DOC.read_text(encoding="utf-8")
     doc_out = doc
@@ -473,11 +548,7 @@ def sync_fixtures(repo: str, pr_number: int, *, dry_run: bool) -> list[str]:
     doc_out = re.sub(r"\bpr (view|edit|close) \d+", lambda m: f"pr {m.group(1)} {pr_number}",
                      doc_out)
 
-    changes = [
-        (BEAT_TRANSCRIPT, transcript, transcript_out),
-        (BEAT_GROUND_TRUTH, ground_truth, ground_truth_out),
-        (PROP_DOC, doc, doc_out),
-    ]
+    changes.append((PROP_DOC, doc, doc_out))
     for path, before, after in changes:
         if before == after:
             log.append(f"{path.name} already agrees")
@@ -489,9 +560,35 @@ def sync_fixtures(repo: str, pr_number: int, *, dry_run: bool) -> list[str]:
         log.append(f"rewrote {path.name} for PR #{pr_number} (“{spoken_phrase}”)")
 
     if not dry_run:
-        json.loads(BEAT_GROUND_TRUTH.read_text(encoding="utf-8"))  # must still parse
-        log.append("ground truth still parses as JSON")
+        for _t, _ts, truth_path, truth_segment, _scope in BEAT_FIXTURES:
+            document = json.loads(truth_path.read_text(encoding="utf-8"))  # must still parse
+            spoken_lines = {
+                str(row.get("segment_id")): str(row.get("text", ""))
+                for row in _read_jsonl_rows(_t)
+            }
+            for statement in document.get("statements", []):
+                if statement.get("segment_id") != truth_segment:
+                    continue
+                if statement.get("quote") != spoken_lines.get(truth_segment):
+                    raise WorldError(
+                        f"{truth_path.name}: the {truth_segment} quote no longer matches "
+                        f"the sentence in {_t.name}"
+                    )
+            log.append(f"{truth_path.name} parses, and its quote matches {_t.name}")
     return log
+
+
+def _read_jsonl_rows(path: Path) -> list[dict]:
+    """Every parseable JSON object in a .jsonl file. Malformed lines are skipped."""
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
 
 
 # --- entry point ------------------------------------------------------------

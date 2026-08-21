@@ -60,8 +60,9 @@ def post_undo(card_id: str, token: str | None = TOKEN):
 # =============================================================================
 print("== M2: one app, five tabs, on every page ==")
 
-TAB_LABELS = ["Meetings", "Live", "Follow-through", "Ledger", "Connections"]
-TAB_HREFS = ["/meetings/", "/meetings/live", "/", "/ledger", "/connections"]
+# LIVE FIRST — the order of the sitting, not the order the tabs were built in.
+TAB_LABELS = ["Live", "Meetings", "Follow-through", "Ledger", "Connections"]
+TAB_HREFS = ["/meetings/live", "/meetings/", "/", "/ledger", "/connections"]
 
 
 def tabs_of(markup: str) -> list[tuple[str, str]]:
@@ -195,11 +196,28 @@ check(
 # =============================================================================
 print("\n== dress finding 2: the pipeline panel does not eat the first screen ==")
 
-check("the pipeline panel is a <details>", "<details class=\"guts\"" in board_markup)
-check("it is collapsed by default", "<details class=\"guts\" data-mode" in board_markup
-      and 'data-guts-details open' not in board_markup)
-check("its summary still carries all four stage headlines", board_markup.count('class="guts-chip"') == 4)
-check("the detail lines are still in the document", 'class="guts-stage"' in board_markup)
+# THIS FINDING WAS SOLVED A SECOND TIME, BETTER. The original fix collapsed the
+# panel into a <details> so it stopped eating the first screen — which worked and
+# cost the demo the thing the panel was for: nobody could watch the system think
+# without clicking. The panel is now a RAIL in the right-hand column, so it takes
+# ZERO vertical space above the cards (the fold measurement improved: first card
+# top 289px -> 177px at 1512x900) and can be permanently open.
+#
+# The finding's real contract is what these assertions now say: the pipeline must
+# not sit above the card feed, and all four stages must be on screen without a
+# click.
+check("the pipeline panel is not a collapsed <details> any more",
+      "<details" not in board_markup)
+check("the pipeline lives in the rail column, not above the cards",
+      'class="board-rail"' in board_markup
+      and board_markup.index('class="board-cards"') < board_markup.index('class="board-rail"'))
+check("all four stage headlines are visible without a click",
+      board_markup.count('class="rail-stage"') == 4)
+check("every stage is still named", all(
+    f'data-stage="{stage}"' in board_markup
+    for stage in ("watcher", "extraction", "planner", "executors")
+))
+check("the rail carries a live region", 'class="rail-live"' in board_markup)
 
 
 # =============================================================================
@@ -350,8 +368,29 @@ check("the cancelled countdown is included", any(card["state"] == "cancelled" fo
 check("cards run forwards in fire order",
       [card["fired_at"] for card in view["cards"]]
       == sorted(card["fired_at"] for card in view["cards"]))
-check("it links back to the transcript",
-      view["transcript_url"] == f"/meetings/{dress_journal.MEETING_ID}")
+# THE TRANSCRIPT CROSSLINK IS CONDITIONAL, AND THAT IS THE FIX, NOT A REGRESSION.
+# It used to be an unconditional f"/meetings/{meeting_id}", which meant every
+# meeting the library does NOT hold — this dress-rehearsal journal, and the
+# default `--replay` tape — offered a "Transcript" link straight to a 404, on
+# the page a judge reaches by clicking Follow-through from a meeting. It now
+# asks the library first. Both answers are pinned here.
+board_server._TRANSCRIPT_PRESENT.clear()
+board_server._TRANSCRIPT_MISSES.clear()
+_real_read_document = board_server._read_meeting_document
+board_server._read_meeting_document = lambda mid: {}
+try:
+    check("a fabricated meeting offers no transcript link, rather than a 404",
+          board_server.load_meeting_view(dress_journal.MEETING_ID)["transcript_url"] == "")
+finally:
+    board_server._read_meeting_document = _real_read_document
+    board_server._TRANSCRIPT_PRESENT.clear()
+    board_server._TRANSCRIPT_MISSES.clear()
+
+board_server._TRANSCRIPT_PRESENT[dress_journal.MEETING_ID] = True
+check("a meeting the library holds links back to the transcript",
+      board_server.load_meeting_view(dress_journal.MEETING_ID)["transcript_url"]
+      == f"/meetings/{dress_journal.MEETING_ID}")
+board_server._TRANSCRIPT_PRESENT.clear()
 check("it links to the recap", view["recap_url"] == f"/recap/{dress_journal.MEETING_ID}")
 check("an unknown meeting renders an honest empty page",
       board_server.load_meeting_view("no-such-meeting")["cards"] == [])
@@ -809,34 +848,67 @@ check("Topic, Person and Ticket are swept",
 
 
 # =============================================================================
-print("\n== seed_memory's pre-flight no longer cries wolf on 'issue None' ==")
+print("\n== seed_memory's pre-flight checks the NUMBER, derived from the roadmap ==")
 
 from adjourn import seed_memory  # noqa: E402
 
+# The expectation is no longer hand-written. It comes from seed_demo_world's
+# ROADMAP — the same list that decides which issue GitHub actually creates — so
+# a reordering of the roadmap can no longer leave the pre-flight calling a
+# healthy seed "unexpected", which is exactly what it did for two days after
+# "streaming adapter" gained a mirror issue at #3.
+EXPECTED = seed_memory.expected_issue_numbers()
+check("the roadmap answers for every probe topic",
+      set(EXPECTED) == set(seed_memory.SEED_TOPIC_PROBES), str(EXPECTED))
+check("auth migration is roadmap entry 1 — the number prior-standup says out loud",
+      EXPECTED["auth migration"] == 1, str(EXPECTED))
+check("cache layer is roadmap entry 2 — likewise",
+      EXPECTED["cache layer"] == 2, str(EXPECTED))
+check("streaming adapter has a mirror issue too, and the table knows it",
+      EXPECTED["streaming adapter"] == 3, str(EXPECTED))
+
 
 class _FakeMemory:
+    """Resolves exactly what a correctly seeded memory would."""
+
     def find_issue_for_topic(self, topic: str):
-        return {"cache layer": 2, "auth migration": 1}.get(topic)
+        return EXPECTED.get(topic)
 
 
 printed: list[str] = []
 _real_print = print
-try:
+
+
+def capture(memory) -> bool:
     import builtins
 
-    builtins.print = lambda *args, **kwargs: printed.append(" ".join(str(a) for a in args))
-    healthy = seed_memory.report_topic_resolution(_FakeMemory(), "falkor")
-finally:
-    builtins.print = _real_print
+    printed.clear()
+    try:
+        builtins.print = lambda *args, **kwargs: printed.append(" ".join(str(a) for a in args))
+        return seed_memory.report_topic_resolution(memory, "falkor")
+    finally:
+        builtins.print = _real_print
 
-streaming = next(line for line in printed if "streaming adapter" in line)
-check("a healthy seed reports healthy", healthy is True)
-check("'streaming adapter -> issue None' is labelled correct, not broken",
-      "ok" in streaming and "Linear ticket" in streaming, streaming)
-check("a real miss still says re-run --reseed",
-      "re-run --reseed" in "".join(
-          l for l in printed if "cache layer" in l
-      ) or True)
+
+healthy = capture(_FakeMemory())
+check("a healthy seed reports healthy", healthy is True, str(printed))
+check("every probe printed a line", len(printed) == len(seed_memory.SEED_TOPIC_PROBES),
+      str(printed))
+check("nothing is labelled unexpected",
+      not any("unexpected" in line for line in printed), str(printed))
+
+
+class _MisnumberedMemory:
+    """The failure that costs a demo: every card fires, onto the wrong issue."""
+
+    def find_issue_for_topic(self, topic: str):
+        return {"cache layer": 3, "auth migration": 1, "streaming adapter": 2}.get(topic)
+
+
+misnumbered = capture(_MisnumberedMemory())
+check("a seed whose numbers are swapped is reported BROKEN", misnumbered is False, str(printed))
+check("...and it says which number was expected",
+      any("expected issue #2" in line for line in printed), str(printed))
 
 
 class _BrokenMemory:

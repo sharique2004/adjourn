@@ -35,38 +35,49 @@
 
 <main class="board">
 
+  {# THE PREFLIGHT, IN ONE GLANCE.
+     Nine executors rendered as nine full action cards took two and a half
+     screens, and the question this tab exists to answer — which of these is
+     real right now — cannot be answered by scrolling. The information is
+     unchanged, down to the last secret name; it is a table instead, with the
+     mode badges in one column so the LIVE/SIM split is a shape you read in a
+     second rather than nine headlines you read in order. #}
+  {% set live_count = connections.executors | selectattr('mode', 'equalto', 'live') | list | length %}
   <section class="column">
-    <h2 class="column-title">Executors <span class="column-count">{{ connections.executors | length }}</span></h2>
-    {% for row in connections.executors %}
-    <article class="card" data-kind="{{ row.kind }}" data-state="{{ 'ok' if row.registered else 'failed' }}">
-      <div class="card-rail" aria-hidden="true"></div>
-      <div class="card-body">
-        <header class="card-top">
-          <span class="chip">{{ row.label }}</span>
+    <h2 class="column-title">
+      Executors
+      <span class="column-count">{{ connections.executors | length }}</span>
+      <span class="spacer"></span>
+      <span class="preflight-split">{{ live_count }} live · {{ connections.executors | length - live_count }} sim</span>
+    </h2>
+    <div class="preflight">
+      {% for row in connections.executors %}
+      <div class="preflight-row" data-kind="{{ row.kind }}" data-mode="{{ row.mode }}">
+        <span class="chip chip-small">{{ row.label }}</span>
+        <span class="preflight-mode">
           {% if row.mode == 'live' %}
             <span class="badge badge-live"><span class="dot"></span>LIVE</span>
           {% else %}
             <span class="badge badge-sim">SIM</span>
           {% endif %}
+        </span>
+        <span class="preflight-why">
+          {{ row.why }}
           {% if not row.registered %}<span class="badge badge-failed">UNREGISTERED</span>{% endif %}
-          <span class="spacer"></span>
-          <span class="stamp">{{ row.kind }}</span>
-        </header>
-        <h2 class="headline">{{ row.why }}</h2>
-        <footer class="card-bottom">
-          {% if row.requires %}
-            <span class="external-id">needs {{ row.requires | join(' · ') }}</span>
-          {% elif row.uses_gh_cli %}
-            <span class="external-id">auth via the gh CLI</span>
-          {% else %}
-            <span class="external-id">writes locally · no secret</span>
-          {% endif %}
-          <span class="spacer"></span>
-          {% if row.missing %}<span class="undo-note">missing: {{ row.missing | join(', ') }}</span>{% endif %}
-        </footer>
+        </span>
+        <span class="preflight-needs">
+          {%- if row.requires -%}
+            needs {{ row.requires | join(' · ') }}
+          {%- elif row.uses_gh_cli -%}
+            auth via the gh CLI
+          {%- else -%}
+            writes locally · no secret
+          {%- endif -%}
+        </span>
+        <span class="preflight-kind">{{ row.kind }}</span>
       </div>
-    </article>
-    {% endfor %}
+      {% endfor %}
+    </div>
   </section>
 
   <section class="column">
@@ -83,7 +94,10 @@
             <span class="badge badge-failed">NO ANSWER</span>
           {% endif %}
           <span class="spacer"></span>
-          <span class="stamp">MeetingScribe</span>
+          {# The recorder is an implementation detail, not a second product the
+             judge is meant to go find. This page names the SEAM (loopback, the
+             port, whether it answers) and never the other app. #}
+          <span class="stamp">loopback</span>
         </header>
         <h2 class="headline">{{ connections.engine.detail }}</h2>
         <footer class="card-bottom">
@@ -108,7 +122,10 @@
         {# Only the COUNTS. memory.stats() also carries strings ("backend",
            "database"), and "actions 0 · backend falkor · commitments 1" reads
            like a broken number rather than a label. #}
-        <h2 class="headline">
+        {# Nine counts are DATA, and data is set in the mono face at data size —
+           at the card headline's 20.5px they wrapped to three lines and read as
+           a sentence that had gone wrong. #}
+        <h2 class="headline memory-counts">
           {%- if connections.memory.available -%}
             {% set counts = [] %}
             {% for name, count in (connections.memory.stats or {}) | dictsort %}
@@ -142,11 +159,12 @@
           <span class="spacer"></span>
           <span class="stamp">FalkorDB Cloud</span>
         </header>
-        <h2 class="headline">{{ connections.cloud.message }}</h2>
+        {# The full probe sentence — endpoint and all — is on the title, not in
+           20px type across a projector. #}
+        <h2 class="headline" title="{{ connections.cloud.message }}">{{ connections.cloud.headline or connections.cloud.message }}</h2>
         <footer class="card-bottom">
           {% if connections.cloud.configured %}
           <span class="external-id">
-            {{ connections.cloud.host }}:{{ connections.cloud.port }} ·
             {{ 'TLS' if connections.cloud.tls else 'plaintext' }} ·
             backlog {{ connections.cloud.backlog_lines }}
           </span>
@@ -158,70 +176,72 @@
 
   <section class="column">
     <h2 class="column-title">Secrets <span class="column-count">presence only</span></h2>
-    <article class="card" data-kind="email_send" data-state="ok">
-      <div class="card-rail" aria-hidden="true"></div>
-      <div class="card-body">
-        <ol class="commitments">
-          {% for name, present in connections.secrets | dictsort %}
-          <li class="commitment" data-state="{{ 'ok' if present else 'undone' }}">
-            <span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body">
-              <p class="commitment-summary">{{ name }}</p>
-              <p class="commitment-meta">
-                {% if present %}
-                  <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
-                {% else %}
-                  <span class="badge badge-sim">ABSENT</span>
-                {% endif %}
-              </p>
-            </div>
-          </li>
-          {% endfor %}
-        </ol>
-        <p class="source-note">
-          Booleans, not values. Adjourn reads secrets through one accessor and no
-          surface — this page, the board, the journal, the recap, the cloud
-          mirror — is allowed to render one.
-        </p>
+    {# SIX BOOLEANS ARE A LIST, NOT SIX RECORDS. These used to borrow the
+       ledger's commitment row, one name and one badge per line, which made the
+       shortest facts on the tab the tallest block on it — and borrowed the
+       undone STATE with it, so an absent secret was rendered struck through.
+       A secret that is not on file has not been deleted; it was never there. #}
+    <div class="secretgrid">
+      {% for name, present in connections.secrets | dictsort %}
+      <div class="secretrow" data-present="{{ 'true' if present else 'false' }}">
+        <span class="secretname">{{ name }}</span>
+        {% if present %}
+          <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
+        {% else %}
+          <span class="badge badge-sim">ABSENT</span>
+        {% endif %}
       </div>
-    </article>
+      {% endfor %}
+    </div>
+    <p class="source-note">
+      Booleans, not values. Adjourn reads secrets through one accessor and no
+      surface — this page, the board, the journal, the recap, the cloud
+      mirror — is allowed to render one.
+    </p>
   </section>
 
+  {# SIX FACTS, SIX LINES. Same reasoning as the secrets block above: these were
+     six ledger commitment rows, each with a coloured rail and a two-line body,
+     for six one-line answers. A label column and a value column is the shape
+     the content actually has. #}
   <section class="column">
     <h2 class="column-title">Targets</h2>
-    <article class="card" data-kind="github_update" data-state="ok">
-      <div class="card-rail" aria-hidden="true"></div>
-      <div class="card-body">
-        <ol class="commitments">
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">GitHub repo</p>
-              <p class="commitment-meta"><span class="external-id">{{ connections.targets.github_repo }}</span>
-                <span class="elapsed">allowlist: {{ connections.targets.github_allowlist | join(', ') }}</span></p></div></li>
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">Linear team</p>
-              <p class="commitment-meta"><span class="external-id">{{ connections.targets.linear_team }}</span></p></div></li>
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">gh CLI on PATH</p>
-              <p class="commitment-meta">
-                {% if connections.gh_cli_present %}
-                  <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
-                {% else %}
-                  <span class="badge badge-failed">ABSENT</span>
-                {% endif %}
-              </p></div></li>
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">Journal</p>
-              <p class="commitment-meta"><span class="external-id">{{ connections.targets.journal }}</span></p></div></li>
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">Recaps</p>
-              <p class="commitment-meta"><span class="external-id">{{ connections.targets.recaps }}</span></p></div></li>
-          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
-            <div class="commitment-body"><p class="commitment-summary">Board bind</p>
-              <p class="commitment-meta"><span class="external-id">{{ connections.targets.board_bind }}</span>
-                <span class="elapsed">loopback only · undo needs this run's token</span></p></div></li>
-        </ol>
+    <dl class="targets">
+      <div class="targetrow">
+        <dt class="targetname">GitHub repo</dt>
+        <dd class="targetvalue"><span class="external-id">{{ connections.targets.github_repo }}</span>
+          <span class="targetnote">allowlist: {{ connections.targets.github_allowlist | join(', ') }}</span></dd>
       </div>
-    </article>
+      <div class="targetrow">
+        <dt class="targetname">Linear team</dt>
+        <dd class="targetvalue"><span class="external-id">{{ connections.targets.linear_team }}</span></dd>
+      </div>
+      <div class="targetrow">
+        <dt class="targetname">gh CLI on PATH</dt>
+        <dd class="targetvalue">
+          {% if connections.gh_cli_present %}
+            <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
+          {% else %}
+            <span class="badge badge-failed">ABSENT</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div class="targetrow">
+        <dt class="targetname">Journal</dt>
+        <dd class="targetvalue"><span class="external-id">{{ connections.targets.journal }}</span>
+          <span class="targetnote">one line per action</span></dd>
+      </div>
+      <div class="targetrow">
+        <dt class="targetname">Recaps</dt>
+        <dd class="targetvalue"><span class="external-id">{{ connections.targets.recaps }}</span>
+          <span class="targetnote">one page per meeting</span></dd>
+      </div>
+      <div class="targetrow">
+        <dt class="targetname">Board bind</dt>
+        <dd class="targetvalue"><span class="external-id">{{ connections.targets.board_bind }}</span>
+          <span class="targetnote">loopback only · undo needs this run's token</span></dd>
+      </div>
+    </dl>
   </section>
 
 </main>
@@ -229,7 +249,9 @@
 <footer class="footfall">
   <span>Adjourn</span>
   <span class="dot-sep">·</span>
-  <span>read at {{ connections.generated_at }}</span>
+  <span>read at {{ connections.generated_clock }}</span>
+  <span class="dot-sep">·</span>
+  <span class="footfall-privacy">{{ privacy_line }}</span>
 </footer>
 
 <script src="{{ url_for('static', filename='board.js') }}" defer></script>
