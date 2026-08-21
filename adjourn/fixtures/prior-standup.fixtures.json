@@ -1,0 +1,66 @@
+{
+  "_comment": "Ground truth for prior-standup.jsonl, hand-written. This is the meeting the demo meeting contradicts: Redis / Sam / the twenty-second on issue #2. Loaded verbatim by extraction.load_fixture_statements('prior-standup'), and used to seed memory before the demo so the conflict judge has a history to judge against.",
+  "meeting": {
+    "meeting_id": "prior-standup",
+    "title": "MMM Standup",
+    "date": "2026-08-14"
+  },
+  "statements": [
+    {
+      "segment_id": "prior-s03",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "Use Redis for the transcript ingestion cache on issue #2, because the team already operates Redis for the queue.",
+      "kind": "decision",
+      "entity_refs": {"issue_number": 2},
+      "quote": "Caching first. I went through the numbers on issue two and Redis is the right call — we already run it for the queue, so it's not a new thing to operate.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "prior-s05",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "Sam owns the cache layer work because he already knows the ingestion path.",
+      "kind": "assignment",
+      "entity_refs": {"person": "Sam"},
+      "quote": "Sam owns it. He's already got the whole ingestion path in his head, so it's the cheapest handoff.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "prior-s07",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "The cache layer ships on the twenty-second, leaving a week of soak before month end.",
+      "kind": "deadline",
+      "entity_refs": {"deadline_text": "the twenty-second"},
+      "quote": "Ship the twenty-second. That leaves us a week of soak before the end of the month.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "prior-s09",
+      "speaker": "Them",
+      "topic": "streaming adapter",
+      "claim": "SHA-5, the streaming adapter, is still in progress: the ingestion path is sketched out but nothing is merged.",
+      "_comment": "The words 'streaming adapter' sit in the SAME segment as SHA-5 on purpose. This statement is what SETTLES the ticket's name in memory, and the demo's progress-report beat snaps to whatever it settles on. An earlier wording put 'interface' in this sentence and seeding christened SHA-5 'interface design' — technically defensible, and wrong on a screen.",
+      "kind": "update",
+      "entity_refs": {"linear_identifier": "SHA-5"},
+      "quote": "SHA-5, the streaming adapter, is still in progress. The ingestion path is sketched out, nothing merged yet.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "prior-s11",
+      "speaker": "Them",
+      "topic": "auth migration",
+      "claim": "The auth migration on issue #1 is on track; the dev environment has authenticated end to end since Tuesday.",
+      "kind": "update",
+      "entity_refs": {"issue_number": 1},
+      "quote": "Issue one is on track. The dev environment has been authenticating end to end since Tuesday.",
+      "source": "final",
+      "engine": "fixtures"
+    }
+  ]
+}

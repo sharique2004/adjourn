@@ -1,0 +1,43 @@
+{
+  "_comment": "Ground truth for pr-review-beat.jsonl, hand-written. ONE statement: the demo corrects the button colour on the standing prop PR sharique2004/adjourn#6 ('[demo-prop] Add join button to landing page'). Loaded verbatim by extraction.load_fixture_statements('pr-review-beat'). See PR_REVIEW_PROP.md in this directory for the prop, the spoken line, and the between-rehearsals reset.",
+  "_stage_2_closed": "EntityReferences carries pr_topic / old_value / new_value, so pr_topic 'join button' and new_value '#6b7f99' ride in entity_refs and survive load_fixture_statements(). planner.build_pr_review_suggestion routes them to kind 'pr_review_suggestion' and suppresses the github_update that used to carry this beat. old_value stays absent by design and is derived from the diff at execution time.",
+  "meeting": {
+    "meeting_id": "pr-review-beat",
+    "title": "MMM Standup — PR review beat",
+    "date": "2026-08-21"
+  },
+  "statements": [
+    {
+      "segment_id": "prb-s05",
+      "speaker": "You",
+      "topic": "join button",
+      "claim": "The join button on PR #6 should use the team's slate blue #6b7f99 instead of the green it currently ships.",
+      "kind": "decision",
+      "entity_refs": {
+        "issue_number": 6,
+        "person": "Priya",
+        "pr_topic": "join button",
+        "new_value": "#6b7f99"
+      },
+      "quote": "Yeah, the copy's fine. But on Priya's join button PR — pull six — that green is wrong. It should be our slate blue, six B seven F nine nine.",
+      "source": "final",
+      "engine": "fixtures",
+      "_comment": "kind is 'decision' because ROUTING_TABLE maps decision -> github_update and this beat is a plan being reversed, not an assignment or a deadline; planner.build_pr_review_suggestion then takes it and SUPPRESSES that github_update. Both entity_refs are spoken IN prb-s05, per the rule in fixtures/README.md: 'pull six' gives issue_number 6 (GitHub numbers PRs and issues in one space, so a spoken pull number is an issue_number), and 'Priya's' gives person. person is safe on a decision — planner._describe_change only reads person when kind == 'assignment', so this cannot render a spurious 'owner X -> Y' diff. The number is rewritten by adjourn.tools.seed_demo_world.sync_fixtures whenever the prop is rebuilt; do not hand-edit it.",
+      "_claim_note": "The claim deliberately does NOT name the old hex. #2ecc71 is nowhere in the transcript — it is only in the PR's diff. Writing it into the claim would make this ground truth unreachable for a live extraction run, which sees the words and not the code, and the whole point of the fixture floor is that it describes a CORRECT reading of the transcript. The old value is recorded under _extras with its provenance marked, and reading it is the reviewer's job, not the extractor's.",
+      "_extras": {
+        "_convention": "Stage-2 payload for the PR-review action. DROPPED by Statement.from_dict — documentation and test input only, never runtime data. When EntityReferences grows real fields, these are the names to use.",
+        "pr_topic": "join button",
+        "pr_number": 6,
+        "pr_url": "https://github.com/sharique2004/adjourn/pull/6",
+        "old_value": "#2ecc71",
+        "old_value_provenance": "diff",
+        "old_value_location": "web/app/globals.css:33",
+        "old_value_line": "  --join-accent: #2ecc71;",
+        "new_value": "#6b7f99",
+        "new_value_provenance": "transcript",
+        "new_value_spoken_as": "six B seven F nine nine"
+      },
+      "_stage_2_closed_note": "old_value is still absent from entity_refs and that is still correct — '#2ecc71' is nowhere in the transcript. It is no longer a gap, though: pr_review_suggestion_executor.derive_old_value reads it out of the PR's diff, accepting the answer only when the diff adds exactly one colour. So the inline suggestion fires without anyone reading a hex code aloud."
+    }
+  ]
+}

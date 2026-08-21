@@ -1,0 +1,226 @@
+/* Adjourn board — the only client-side logic there is.
+ *
+ * Three jobs, nothing more:
+ *   1. poll /api/fragment once a second and swap in server-rendered HTML,
+ *   2. animate the countdown rings locally from each card's fire_at,
+ *   3. send an undo and say honestly what came back.
+ *
+ * There is deliberately no card markup in this file. The server renders the
+ * cards from the same Jinja macros that rendered the page, so what you curl and
+ * what you watch can never disagree.
+ */
+
+(function () {
+  "use strict";
+
+  var POLL_INTERVAL_MS = 1000;
+  var RING_INTERVAL_MS = 250;
+  var RING_CIRCUMFERENCE = 131.95; /* 2 * pi * r, r = 21 — matches board.css */
+
+  var body = document.body;
+  var view = body.dataset.view || "board";
+  /* Only the board polls. The ledger, the connections page and one meeting's
+   * page are read-once documents; polling them would churn HTML nobody is
+   * watching change. */
+  var pollsForFragments = view === "board";
+
+  /* This run's undo token, minted by the server at start and printed into the
+   * page. A page from another origin can POST to 127.0.0.1 but cannot read this
+   * attribute and cannot set a custom header on a simple form post, so a stray
+   * tab can no longer reverse a live GitHub write mid-demo. */
+  var undoToken = body.dataset.undoToken || "";
+
+  var pendingHost = document.getElementById("pending");
+  var cardsHost = document.getElementById("cards");
+  var gutsHost = document.getElementById("guts") || document.querySelector("[data-guts]");
+  var headerHost = document.querySelector("[data-header]");
+  var toastElement = document.getElementById("toast");
+
+  var currentVersion = body.dataset.version || "";
+  var knownCardKeys = collectCardKeys();
+  var toastTimer = null;
+
+  /* --- card entrance ----------------------------------------------------- */
+
+  function collectCardKeys() {
+    var keys = Object.create(null);
+    var cards = document.querySelectorAll(".card[data-key]");
+    for (var index = 0; index < cards.length; index += 1) {
+      keys[cards[index].dataset.key] = true;
+    }
+    return keys;
+  }
+
+  function markNewCards() {
+    var cards = document.querySelectorAll(".card[data-key]");
+    var nextKeys = Object.create(null);
+    for (var index = 0; index < cards.length; index += 1) {
+      var card = cards[index];
+      var key = card.dataset.key;
+      nextKeys[key] = true;
+      if (!knownCardKeys[key]) {
+        card.classList.add("is-entering");
+      }
+    }
+    knownCardKeys = nextKeys;
+  }
+
+  /* --- countdown rings ---------------------------------------------------- */
+
+  function tickCountdownRings() {
+    var now = Date.now();
+    var cards = document.querySelectorAll(".card-pending[data-fire-at]");
+    for (var index = 0; index < cards.length; index += 1) {
+      var card = cards[index];
+      var fireAt = Date.parse(card.dataset.fireAt);
+      if (isNaN(fireAt)) {
+        continue;
+      }
+      var windowSeconds = parseFloat(card.dataset.window) || 60;
+      var remaining = Math.max(0, (fireAt - now) / 1000);
+      var fraction = Math.max(0, Math.min(1, remaining / windowSeconds));
+
+      var progress = card.querySelector(".ring-progress");
+      if (progress) {
+        progress.setAttribute(
+          "stroke-dashoffset",
+          (RING_CIRCUMFERENCE * (1 - fraction)).toFixed(2)
+        );
+      }
+      var label = card.querySelector("[data-countdown-label]");
+      if (label) {
+        /* At zero the ring is full and the orchestrator is about to send; "0s"
+         * reads as a dead timer, "now" reads as what is actually happening. */
+        label.textContent = remaining <= 0 ? "now" : Math.ceil(remaining) + "s";
+      }
+    }
+  }
+
+  /* --- polling ------------------------------------------------------------ */
+
+  function applyFragment(fragment) {
+    if (!fragment || fragment.unchanged) {
+      return;
+    }
+    if (headerHost && fragment.header_html) {
+      headerHost.innerHTML = fragment.header_html;
+    }
+    if (pendingHost) {
+      pendingHost.innerHTML = fragment.pending_html || "";
+    }
+    if (cardsHost) {
+      cardsHost.innerHTML = fragment.cards_html || "";
+    }
+    if (gutsHost && Object.prototype.hasOwnProperty.call(fragment, "guts_html")) {
+      /* The pipeline panel is a <details>, collapsed by default so the pinned
+       * cards clear the fold. If a viewer opened it, the 1s swap must not close
+       * it under their hand — carry the open state across the replacement. */
+      var wasOpen = false;
+      var previous = gutsHost.querySelector("[data-guts-details]");
+      if (previous) {
+        wasOpen = previous.open;
+      }
+      gutsHost.innerHTML = fragment.guts_html || "";
+      var replacement = gutsHost.querySelector("[data-guts-details]");
+      if (replacement && wasOpen) {
+        replacement.open = true;
+      }
+    }
+    currentVersion = fragment.version || currentVersion;
+    body.dataset.version = currentVersion;
+    markNewCards();
+    tickCountdownRings();
+  }
+
+  function pollOnce() {
+    if (!pollsForFragments) {
+      return Promise.resolve();
+    }
+    return fetch("/api/fragment?version=" + encodeURIComponent(currentVersion), {
+      headers: { Accept: "application/json" },
+      cache: "no-store"
+    })
+      .then(function (response) {
+        return response.ok ? response.json() : null;
+      })
+      .then(applyFragment)
+      .catch(function () {
+        /* The orchestrator may be restarting. Stay quiet and try again in 1s. */
+      });
+  }
+
+  /* --- undo --------------------------------------------------------------- */
+
+  function showToast(message, tone) {
+    if (!toastElement) {
+      return;
+    }
+    toastElement.textContent = message;
+    toastElement.dataset.tone = tone || "";
+    toastElement.hidden = false;
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () {
+      toastElement.hidden = true;
+    }, 4200);
+  }
+
+  function sendUndo(cardId, button) {
+    button.disabled = true;
+    button.textContent = "…";
+    var headers = { Accept: "application/json" };
+    if (undoToken) {
+      headers["X-Adjourn-Undo-Token"] = undoToken;
+    }
+    fetch("/undo/" + encodeURIComponent(cardId), {
+      method: "POST",
+      headers: headers,
+      cache: "no-store"
+    })
+      .then(function (response) {
+        return response.json().catch(function () {
+          return { ok: false, message: "the board could not read the response" };
+        });
+      })
+      .then(function (outcome) {
+        showToast(outcome.message || (outcome.ok ? "undone" : "refused"), outcome.ok ? "good" : "bad");
+        currentVersion = ""; /* force a re-render on the next poll */
+        if (!pollsForFragments) {
+          /* One meeting's page does not poll, so it reloads to show the card in
+           * its undone state rather than leaving a button that lies. */
+          window.setTimeout(function () { window.location.reload(); }, 900);
+          return Promise.resolve();
+        }
+        return pollOnce();
+      })
+      .catch(function () {
+        showToast("undo could not reach the board", "bad");
+        button.disabled = false;
+        /* Restore the word the button actually had — a countdown says "Cancel". */
+        button.textContent = button.dataset.undoLabel || "Undo";
+      });
+  }
+
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest ? event.target.closest("[data-undo]") : null;
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    sendUndo(button.dataset.undo, button);
+  });
+
+  /* --- start -------------------------------------------------------------- */
+
+  markNewCards();
+  tickCountdownRings();
+
+  if (pollsForFragments) {
+    window.setInterval(pollOnce, POLL_INTERVAL_MS);
+    window.setInterval(tickCountdownRings, RING_INTERVAL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) {
+        pollOnce();
+      }
+    });
+  }
+})();

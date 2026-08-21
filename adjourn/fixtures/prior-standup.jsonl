@@ -1,0 +1,13 @@
+{"type":"meta","meeting_id":"prior-standup","title":"MMM Standup","date":"2026-08-14"}
+{"type":"segment","segment_id":"prior-s01","speaker":"Them","track":"system","start":0.0,"end":4.2,"text":"Are we recording? Okay. Quick one, I've got a hard stop at ten."}
+{"type":"segment","segment_id":"prior-s02","speaker":"You","track":"mic","start":4.5,"end":8.1,"text":"Recording. Three things and we're out."}
+{"type":"segment","segment_id":"prior-s03","speaker":"Them","track":"system","start":8.4,"end":22.7,"text":"Caching first. I went through the numbers on issue two and Redis is the right call — we already run it for the queue, so it's not a new thing to operate."}
+{"type":"segment","segment_id":"prior-s04","speaker":"You","track":"mic","start":23.0,"end":26.4,"text":"Fine by me. Who's carrying it?"}
+{"type":"segment","segment_id":"prior-s05","speaker":"Them","track":"system","start":26.7,"end":34.9,"text":"Sam owns it. He's already got the whole ingestion path in his head, so it's the cheapest handoff."}
+{"type":"segment","segment_id":"prior-s06","speaker":"You","track":"mic","start":35.2,"end":38.0,"text":"And when does it land?"}
+{"type":"segment","segment_id":"prior-s07","speaker":"Them","track":"system","start":38.3,"end":47.6,"text":"Ship the twenty-second. That leaves us a week of soak before the end of the month."}
+{"type":"segment","segment_id":"prior-s08","speaker":"You","track":"mic","start":47.9,"end":51.3,"text":"Good. The streaming adapter?"}
+{"type":"segment","segment_id":"prior-s09","speaker":"Them","track":"system","start":51.6,"end":61.8,"text":"SHA-5, the streaming adapter, is still in progress. The ingestion path is sketched out, nothing merged yet."}
+{"type":"segment","segment_id":"prior-s10","speaker":"You","track":"mic","start":62.1,"end":65.7,"text":"Okay. And the auth migration?"}
+{"type":"segment","segment_id":"prior-s11","speaker":"Them","track":"system","start":66.0,"end":74.2,"text":"Issue one is on track. The dev environment has been authenticating end to end since Tuesday."}
+{"type":"segment","segment_id":"prior-s12","speaker":"You","track":"mic","start":74.5,"end":78.9,"text":"That's the three. Go, you'll be late."}

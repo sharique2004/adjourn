@@ -1,0 +1,39 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+
+# Never a filled-in environment file. Only the examples.
+.env
+*.env
+.env.*
+!.env.example
+
+# Runtime state, recordings, transcripts, journals — none of it is source.
+adjourn/state/*
+!adjourn/state/README.md
+adjourn/recaps/*
+!adjourn/recaps/README.md
+executions.jsonl
+*.flac
+*.wav
+*.m4a
+*.mp3
+*.sqlite3
+
+# Built things.
+adjourn/bin/calendar_add
+adjourn/bin/*.dSYM/
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel
+*.tsbuildinfo
+next-env.d.ts
+.venv/
+
+# Scratch.
+scratch/
+scratchpad/
+*.bak
+*.tmp

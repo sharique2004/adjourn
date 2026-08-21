@@ -1,0 +1,53 @@
+# Never commit a filled-in .env — secrets belong in the Keychain, not in git.
+.env
+*.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime state. The rule is the DIRECTORY, not a list of globs inside it.
+#
+# It used to be a list: `state/*.json`, `state/*.jsonl`, and a line each for the
+# two subdirectories anyone had thought of. `state/*.json` is a single-level
+# glob, so the day `state/recap_actions/` appeared it matched nothing inside it,
+# and a file of verbatim meeting quotes became stageable for a public push. A
+# directory rule with one negation for the doc cannot fail that way: a
+# subdirectory added next month is covered the moment it exists.
+# `state/*` rather than `state/` on purpose: git does not descend into an
+# excluded DIRECTORY, so `state/` would make the negation below unreachable and
+# the directory's own doc would vanish from the repo. `state/*` excludes every
+# entry — including each subdirectory, which is what stops recap_actions/ from
+# being walked — while still letting one file back in by name.
+state/*
+!state/README.md
+
+recaps/*
+!recaps/README.md
+
+# Meeting audio and transcripts. These live under ~/.meetingscribe and have no
+# business here, but a stray copy must not become a commit.
+*.jsonl
+*.flac
+*.wav
+*.m4a
+*.mp3
+executions.jsonl
+
+# Compiled Swift helper — built on demand by calendar_hold_executor, 131KB of
+# machine code that has no business in a diff.
+bin/calendar_add
+bin/*.dSYM/
+
+# Scratch space. Anything a human parks here is by definition not the product.
+scratch/
+scratchpad/
+*.bak
+*.tmp
+.DS_Store
+
+# The fixtures ARE the product's floor and must ship, so they are exempted from
+# the transcript rule above. They contain written dialogue, not recordings.
+!fixtures/*.jsonl

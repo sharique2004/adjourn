@@ -1,0 +1,354 @@
+{#
+  The Adjourn board. One template, two views (board + ledger), and every piece of
+  card markup lives in a macro so the 1s poll re-renders exactly what the
+  server-rendered page already showed. There is no second copy in JavaScript.
+
+  THE TAB BAR. Five tabs, one shell, on every page this server hands out.
+  meetings.html carries the same <nav class="viewbar"> with the same five links
+  in the same order — a test renders both and asserts the label/href pairs match
+  exactly, so the two cannot drift. It is a mirror rather than an import for one
+  reason: meetings.html's copy hard-codes is-current for its own two tabs and
+  resolves its hrefs through url_for('meetings.…'), which would leave every
+  board-served page with no current tab and would 500 outright if the Meetings
+  Blueprint ever failed to mount. The mirror below marks whichever tab you are
+  on, and degrades the two Blueprint tabs to disabled text instead of links to a
+  404 when `meetings_mounted` is false.
+#}
+{% macro shell_tabbar(current) -%}
+<nav class="viewbar" aria-label="Sections">
+  {% if meetings_mounted is defined and not meetings_mounted %}
+  <span class="viewlink is-down" title="the Meetings blueprint did not mount">Meetings</span>
+  <span class="viewlink is-down" title="the Meetings blueprint did not mount">Live</span>
+  {% else %}
+  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="/meetings/">Meetings</a>
+  <a class="viewlink {{ 'is-current' if current == 'live' else '' }}" href="/meetings/live">Live</a>
+  {% endif %}
+  <a class="viewlink {{ 'is-current' if current in ('board', 'meeting') else '' }}" href="/">Follow-through</a>
+  <a class="viewlink {{ 'is-current' if current == 'ledger' else '' }}" href="/ledger">Ledger</a>
+  <a class="viewlink {{ 'is-current' if current == 'connections' else '' }}" href="/connections">Connections</a>
+</nav>
+{%- endmacro %}
+
+{#- the leading dash keeps the page starting at <!doctype>, byte zero -#}
+{%- macro mode_badge(mode) -%}
+  {%- if mode == 'live' -%}
+    <span class="badge badge-live"><span class="dot"></span>LIVE</span>
+  {%- else -%}
+    <span class="badge badge-sim">SIM</span>
+  {%- endif -%}
+{%- endmacro -%}
+
+{% macro action_card(card) -%}
+{# data-pinned is what the fold test reads: a card is pinned because of what it
+   IS (a transition), not because of where it happened to land in fire order. #}
+<article class="card" data-kind="{{ card.kind }}" data-key="{{ card.id }}" data-state="{{ card.state }}"
+         {% if card.pinned %}data-pinned="1"{% endif %}>
+  <div class="card-rail" aria-hidden="true"></div>
+  <div class="card-body">
+    <header class="card-top">
+      <span class="chip">{{ card.label }}</span>
+      {# A cancelled card wears CANCELLED instead of a mode badge: it has no
+         mode, because no transport — live or simulated — ever ran. #}
+      {% if card.state == 'cancelled' %}
+        <span class="badge badge-undone">CANCELLED</span>
+      {% else %}
+        {{ mode_badge(card.mode) }}
+        {% if not card.ok %}<span class="badge badge-failed">FAILED</span>{% endif %}
+        {% if card.undone %}<span class="badge badge-undone">UNDONE</span>{% endif %}
+      {% endif %}
+      <span class="spacer"></span>
+      <time class="stamp" datetime="{{ card.fired_at }}" title="{{ card.fired_at }}">{{ card.clock }}</time>
+    </header>
+
+    <h2 class="headline">{{ card.human_summary }}</h2>
+
+    {% if card.quote %}
+    <blockquote class="quote">
+      <span class="quote-text">&ldquo;{{ card.quote }}&rdquo;</span>
+      {% if card.speaker %}<cite class="quote-speaker">{{ card.speaker }}</cite>{% endif %}
+    </blockquote>
+    {% endif %}
+
+    <footer class="card-bottom">
+      {% if card.url %}
+        <a class="link" href="{{ card.url }}" target="_blank" rel="noopener noreferrer">{{ card.link_label }}</a>
+      {% elif card.external_id %}
+        <span class="external-id">{{ card.external_id }}</span>
+      {% endif %}
+      <span class="spacer"></span>
+      <span class="elapsed">{{ card.elapsed }}</span>
+      {% if card.can_undo %}
+        <button class="undo" type="button" data-undo="{{ card.id }}"
+                title="{{ card.undo_title }}"
+                data-undo-label="{{ card.undo_label }}">{{ card.undo_label }}</button>
+      {% else %}
+        <span class="undo-note">{{ card.undo_note }}</span>
+      {% endif %}
+    </footer>
+  </div>
+</article>
+{%- endmacro -%}
+
+{% macro countdown_ring(item) -%}
+{# stroke-dasharray is the full circumference (2πr, r=21 → 131.95); the offset is
+   rendered server-side so the ring is correct before JavaScript runs. #}
+<svg class="ring" viewBox="0 0 48 48" width="48" height="48" role="img"
+     aria-label="{{ item.seconds_remaining }} seconds until this sends">
+  <circle class="ring-track" cx="24" cy="24" r="21"></circle>
+  <circle class="ring-progress" cx="24" cy="24" r="21"
+          stroke-dasharray="131.95"
+          stroke-dashoffset="{{ (131.95 * (1 - item.fraction_remaining)) | round(2) }}"></circle>
+</svg>
+<span class="ring-label" data-countdown-label>{% if item.seconds_remaining > 0 %}{{ item.seconds_remaining }}s{% else %}now{% endif %}</span>
+{%- endmacro -%}
+
+{% macro pending_card(item) -%}
+<article class="card card-pending" data-kind="{{ item.kind }}" data-key="{{ item.id }}"
+         data-fire-at="{{ item.fire_at }}" data-window="{{ item.regret_window_s }}">
+  <div class="card-rail" aria-hidden="true"></div>
+  <div class="card-body">
+    <header class="card-top">
+      <span class="chip">{{ item.label }}</span>
+      <span class="badge badge-holding">HOLDING</span>
+      <span class="spacer"></span>
+      <span class="stamp">sends at {{ item.fire_clock }}</span>
+    </header>
+
+    <div class="pending-row">
+      <div class="ring-wrap">{{ countdown_ring(item) }}</div>
+      <div class="pending-copy">
+        <h2 class="headline">{{ item.human_preview }}</h2>
+        {% if item.quote %}
+        <blockquote class="quote">
+          <span class="quote-text">&ldquo;{{ item.quote }}&rdquo;</span>
+          {% if item.speaker %}<cite class="quote-speaker">{{ item.speaker }}</cite>{% endif %}
+        </blockquote>
+        {% endif %}
+      </div>
+      {# "Cancel", not "Undo": nothing has happened yet. The runbook teaches the
+         distinction out loud, so the button has to agree with the script. #}
+      <button class="undo undo-cancel" type="button" data-undo="{{ item.id }}"
+              data-undo-label="Cancel">Cancel</button>
+    </div>
+  </div>
+</article>
+{%- endmacro -%}
+
+{% macro board_header(state) -%}
+<div class="masthead-inner">
+  <div class="masthead-left">
+    <h1 class="meeting-title">{{ state.meeting.title or 'Adjourn' }}</h1>
+    <p class="meeting-meta">
+      {% if state.meeting.duration %}<span class="meta-item">{{ state.meeting.duration }}</span>{% endif %}
+      <span class="meta-item totals" data-totals>{{ state.totals_line }}</span>
+      {% if state.mode_note %}<span class="meta-item mode-note">{{ state.mode_note }}</span>{% endif %}
+    </p>
+  </div>
+  <p class="tagline">{{ quiet_header_line }}</p>
+</div>
+{%- endmacro -%}
+{%- macro guts_panel(pipeline) -%}
+{# Four stages of the spine, on the same page as the cards. A founder watching
+   this window — not MeetingScribe — can see extract → plan → execute happen.
+
+   COLLAPSED BY DEFAULT, AND THAT IS A MEASUREMENT, NOT A TASTE. The runbook
+   tells the presenter to zoom to 175%, which on a 1512px window is an 864x514
+   CSS viewport. The expanded four-column panel plus the masthead and tab bar
+   filled that entire first screen: the first EXECUTED card began at 497px
+   against a 514px fold, so the money card was four screens down and the runbook
+   was pointing at an empty spot. The summary row below keeps every live number
+   on screen — all four stage headlines, in ~44px instead of ~250px — and the
+   detail lines are one click away. board.js remembers whether you opened it, so
+   the 1s fragment swap never closes it under your hand. #}
+{% set pipeline = pipeline or {} %}
+{% set watcher = pipeline.watcher or {} %}
+{% set extraction = pipeline.extraction or {} %}
+{% set planner = pipeline.planner or {} %}
+{% set executors = pipeline.executors or {} %}
+<details class="guts" data-mode="{{ pipeline.mode or 'idle' }}" data-guts-details>
+  <summary class="guts-head">
+    <h2 class="guts-title">Pipeline</h2>
+    {% if pipeline.mode == 'replay' %}
+      <span class="badge badge-sim">REPLAY</span>
+    {% elif pipeline.mode == 'watch' %}
+      <span class="badge badge-live"><span class="dot"></span>WATCH</span>
+    {% endif %}
+    {% if pipeline.pass_name %}
+      <span class="guts-pass">{{ pipeline.pass_name }}</span>
+    {% endif %}
+    <span class="guts-strip">
+      <span class="guts-chip" data-phase="{{ watcher.phase or 'waiting' }}">
+        <span class="guts-chip-label">Watcher</span>{{ watcher.headline or 'waiting' }}</span>
+      <span class="guts-chip" data-phase="{{ extraction.phase or 'idle' }}">
+        <span class="guts-chip-label">Extraction</span>{{ extraction.headline or 'idle' }}</span>
+      <span class="guts-chip" data-phase="{{ planner.phase or 'idle' }}">
+        <span class="guts-chip-label">Planner</span>{{ planner.headline or 'idle' }}</span>
+      <span class="guts-chip" data-phase="{{ executors.phase or 'idle' }}">
+        <span class="guts-chip-label">Executors</span>{{ executors.headline or 'idle' }}</span>
+    </span>
+    <span class="spacer"></span>
+    <span class="guts-toggle" aria-hidden="true">details</span>
+  </summary>
+  <div class="guts-stages">
+    <article class="guts-stage" data-stage="watcher" data-phase="{{ watcher.phase or 'waiting' }}">
+      <h3 class="guts-label">Watcher</h3>
+      <p class="guts-headline">{{ watcher.headline or 'waiting' }}</p>
+      <p class="guts-detail">{{ watcher.detail or 'waiting for a meeting to end' }}</p>
+    </article>
+    <article class="guts-stage" data-stage="extraction" data-phase="{{ extraction.phase or 'idle' }}">
+      <h3 class="guts-label">Extraction</h3>
+      <p class="guts-headline">{{ extraction.headline or 'idle' }}</p>
+      <p class="guts-detail">{{ extraction.detail or 'idle' }}</p>
+    </article>
+    <article class="guts-stage" data-stage="planner" data-phase="{{ planner.phase or 'idle' }}">
+      <h3 class="guts-label">Planner</h3>
+      <p class="guts-headline">{{ planner.headline or 'idle' }}</p>
+      <p class="guts-detail">{{ planner.detail or 'idle' }}</p>
+    </article>
+    <article class="guts-stage" data-stage="executors" data-phase="{{ executors.phase or 'idle' }}">
+      <h3 class="guts-label">Executors</h3>
+      <p class="guts-headline">{{ executors.headline or 'idle' }}</p>
+      <p class="guts-detail">
+        {% if executors.fired_live %}
+          <span class="badge badge-live"><span class="dot"></span>LIVE {{ executors.fired_live }}</span>
+        {% endif %}
+        {% if executors.fired_sim %}
+          <span class="badge badge-sim">SIM {{ executors.fired_sim }}</span>
+        {% endif %}
+        {% if executors.pending %}
+          <span class="badge badge-holding">HOLDING {{ executors.pending }}</span>
+        {% endif %}
+        {% if executors.cancelled %}
+          <span class="badge badge-undone">CANCELLED {{ executors.cancelled }}</span>
+        {% endif %}
+        {% if not executors.fired_live and not executors.fired_sim and not executors.pending and not executors.cancelled %}
+          {{ executors.detail or 'nothing fired yet' }}
+        {% endif %}
+      </p>
+    </article>
+  </div>
+</details>
+{%- endmacro -%}
+
+{% macro pending_column(pending) -%}
+{% if pending %}
+<section class="column column-pending" aria-label="Actions inside their regret window">
+  <h2 class="column-title">In flight <span class="column-count">{{ pending | length }}</span></h2>
+  {% for item in pending %}{{ pending_card(item) }}{% endfor %}
+</section>
+{% endif %}
+{%- endmacro -%}
+
+{% macro card_column(cards) -%}
+{% if cards %}
+<section class="column column-done" aria-label="Actions Adjourn has executed">
+  <h2 class="column-title">Executed <span class="column-count">{{ cards | length }}</span></h2>
+  {% for card in cards %}{{ action_card(card) }}{% endfor %}
+</section>
+{% else %}
+<section class="empty-state" aria-label="No actions yet">
+  <span class="empty-pulse" aria-hidden="true"></span>
+  <p class="empty-line">{{ empty_state_line }}</p>
+</section>
+{% endif %}
+{%- endmacro -%}
+
+{% macro ledger_person(person) -%}
+<section class="person">
+  <header class="person-head">
+    <span class="avatar" aria-hidden="true">{{ person.initials }}</span>
+    <div class="person-id">
+      <h2 class="person-name">{{ person.speaker }}</h2>
+      <p class="person-meta">
+        {{ person.total }} commitment{{ '' if person.total == 1 else 's' }}
+        · {{ person.meeting_count }} meeting{{ '' if person.meeting_count == 1 else 's' }}
+        · {{ person.live }} live · {{ person.sim }} sim
+        {%- if person.undone %} · {{ person.undone }} undone{% endif %}
+        {%- if person.failed %} · {{ person.failed }} failed{% endif %}
+      </p>
+    </div>
+    <span class="spacer"></span>
+    <span class="kind-tally">
+      {% for entry in person.kinds %}
+      <span class="tally" data-kind="{{ entry.kind }}" title="{{ entry.label }}">{{ entry.label }} {{ entry.count }}</span>
+      {% endfor %}
+    </span>
+  </header>
+  <ol class="commitments">
+    {% for item in person.commitments %}
+    <li class="commitment" data-kind="{{ item.kind }}" data-state="{{ item.state }}">
+      <span class="commitment-rail" aria-hidden="true"></span>
+      <div class="commitment-body">
+        <p class="commitment-summary">{{ item.human_summary }}</p>
+        {% if item.quote %}<p class="quote"><span class="quote-text">&ldquo;{{ item.quote }}&rdquo;</span></p>{% endif %}
+        <p class="commitment-meta">
+          <span class="chip chip-small">{{ item.label }}</span>
+          {{ mode_badge(item.mode) }}
+          {% if item.undone %}<span class="badge badge-undone">UNDONE</span>{% endif %}
+          {% if not item.ok %}<span class="badge badge-failed">FAILED</span>{% endif %}
+          <span class="elapsed">{{ item.clock }}</span>
+          {% if item.meeting_id %}<span class="external-id">{{ item.meeting_id }}</span>{% endif %}
+        </p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{%- endmacro -%}
+
+{# The page body is guarded because /api/fragment imports the macros above via
+   get_template_attribute, which executes this template's top level. Without the
+   guard, importing a macro would try to render the whole page with no state. #}
+{% if state is defined %}
+<!doctype html>
+<html lang="en" data-view="{{ view }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if view == 'ledger' %}Ledger · Adjourn{% elif state.meeting.title %}{{ state.meeting.title }} · Adjourn{% else %}Adjourn{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
+</head>
+<body data-view="{{ view }}" data-version="{{ version }}" data-undo-token="{{ undo_token }}">
+
+<header class="masthead" data-header>
+  {{ board_header(state) }}
+</header>
+
+{{ shell_tabbar(view) }}
+
+{% if view == 'ledger' %}
+<main class="ledger" id="ledger">
+  <p class="ledger-lede">
+    Who promised what, across {{ ledger.meeting_count }} meeting{{ '' if ledger.meeting_count == 1 else 's' }}
+    and {{ ledger.commitment_count }} executed action{{ '' if ledger.commitment_count == 1 else 's' }}.
+  </p>
+  {% if ledger.memory.note %}<p class="source-note">{{ ledger.memory.note }}</p>{% endif %}
+  {% if ledger.people %}
+    {% for person in ledger.people %}{{ ledger_person(person) }}{% endfor %}
+  {% else %}
+  <section class="empty-state">
+    <span class="empty-pulse" aria-hidden="true"></span>
+    <p class="empty-line">No commitments on the books yet.</p>
+  </section>
+  {% endif %}
+</main>
+{% else %}
+<div id="guts" data-guts>{{ guts_panel(state.pipeline) }}</div>
+<main class="board">
+  <div id="pending">{{ pending_column(state.pending) }}</div>
+  <div id="cards">{{ card_column(state.cards) }}</div>
+</main>
+{% endif %}
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<footer class="footfall">
+  <span>Adjourn</span>
+  <span class="dot-sep">·</span>
+  <span>local-first · deterministic core · model only at the edges</span>
+</footer>
+
+<script src="{{ url_for('static', filename='board.js') }}" defer></script>
+</body>
+</html>
+{% endif %}

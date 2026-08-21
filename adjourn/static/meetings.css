@@ -1,0 +1,658 @@
+/* The Meetings tab — an extension of board.css, never a replacement for it.
+ *
+ * board.css is loaded FIRST and owns the tokens, the masthead, the viewbar, the
+ * card shell, the chips, the badges, the empty state and the footer. Nothing in
+ * this file redefines any of those. Every selector here is either a new class
+ * that board.css has never heard of, or a data-attribute variant that sets
+ * --accent on a card the same way [data-kind] does for an action card.
+ *
+ * The one rule that governs the whole file: a meeting row is an action card
+ * wearing a different accent. If the two ever look like they came from
+ * different products, this file is wrong, not board.css.
+ */
+
+/* --- status accents ------------------------------------------------------
+ * board.css assigns one accent per action kind. Meetings have a status instead,
+ * and it is the same mechanism: set --accent, let the shared .card-rail and
+ * .chip pick it up. "done" deliberately keeps board.css's neutral default —
+ * a finished recording is the quiet, ordinary case and should not glow.
+ */
+
+.mrow[data-status="recording"]  { --accent: var(--live); }
+.mrow[data-status="processing"] { --accent: var(--hold); }
+.mrow[data-status="error"]      { --accent: var(--fail); }
+.mrow[data-status="done"]       { --accent: #8b93a7; }
+
+.chip-status[data-status="recording"]  { --accent: var(--live); }
+.chip-status[data-status="processing"] { --accent: var(--hold); }
+.chip-status[data-status="error"]      { --accent: var(--fail); }
+.chip-status[data-status="done"]       { --accent: #8b93a7; }
+
+/* --- tab bar -------------------------------------------------------------
+ * board.css sizes .viewbar for two tabs; this one carries five, and at a narrow
+ * width "Follow-through" broke across two lines and pushed the pill out of
+ * shape. Wrapping the BAR rather than the words keeps every tab one pill tall.
+ * Scoped to pages that load this file, so the board's own two-tab bar is
+ * untouched.
+ */
+
+.viewbar { flex-wrap: wrap; }
+.viewbar .viewlink { white-space: nowrap; }
+
+/* --- page ---------------------------------------------------------------- */
+
+.mpage {
+  margin: 0 auto;
+  max-width: var(--page);
+}
+
+.crumb {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- search -------------------------------------------------------------- */
+
+.searchbar {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 26px;
+}
+
+.searchfield {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 11px 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--ink-raised);
+  color: var(--text);
+  font-family: inherit;
+  /* 16px keeps iOS from zooming the page on focus, and keeps the field itself
+   * readable from the same distance as the rows it filters. */
+  font-size: 16px;
+  letter-spacing: -0.005em;
+}
+
+.searchfield::placeholder { color: var(--text-dimmer); }
+.searchfield:focus { outline: 2px solid var(--accent, #8b93a7); outline-offset: 2px; }
+.searchfield::-webkit-search-cancel-button { filter: invert(1) opacity(0.45); }
+
+.searchgo {
+  flex: 0 0 auto;
+  padding: 11px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.searchgo:hover { color: var(--text); border-color: var(--text-dimmer); }
+.searchgo:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
+
+.searching {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+/* --- library rows -------------------------------------------------------- */
+
+.mlist { margin: 0; padding: 0; list-style: none; }
+
+/* A row IS a .card — board.css supplies the frame, the rail and the radius.
+ * This only makes it a link that does not look like one. */
+.mrow {
+  text-decoration: none;
+  color: inherit;
+}
+
+.mrow:hover { border-color: var(--line-strong); background: var(--ink-raised-2); }
+
+.mrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mrow .headline { margin-top: 2px; }
+
+.mrow-brief {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.mrow-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.mrow-fact {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.mrow-fact.is-absent { color: var(--text-dimmer); font-style: italic; }
+
+/* A badge with nothing to prove: SUMMARY and NOTES are facts, not states, so
+ * they get the SIM badge's neutral treatment rather than a colour. */
+.badge-quiet {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+}
+
+/* --- detail: follow-through cross-link ----------------------------------- */
+
+.followthrough {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 30px;
+  padding: 15px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.followthrough:hover { background: var(--ink-raised-2); border-color: var(--text-dimmer); }
+.followthrough:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
+
+.followthrough-label {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.followthrough-copy { flex: 1 1 auto; font-size: 16px; color: var(--text-dim); }
+.followthrough-arrow { flex: 0 0 auto; color: var(--text-dimmer); font-size: 18px; }
+
+/* --- detail: warnings ---------------------------------------------------- */
+
+.warnings { margin-bottom: 30px; }
+
+.warnlist {
+  margin: 0;
+  padding: 0 0 0 20px;
+  list-style: none;
+}
+
+.warnlist li {
+  position: relative;
+  margin-bottom: 7px;
+  color: var(--text-dim);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.warnlist li::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hold);
+}
+
+/* --- detail: summary ----------------------------------------------------- */
+
+.summary { margin-bottom: 34px; }
+.summary-card { --accent: #d6c8a6; }  /* the board's recap accent — same idea */
+
+.summary-tldr {
+  margin: 11px 0 0;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.summary-group { margin-top: 20px; }
+
+.summary-group-title {
+  margin: 0 0 8px;
+  color: var(--text-dimmer);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.summary-list { margin: 0; padding: 0 0 0 19px; list-style: none; }
+
+.summary-list li {
+  position: relative;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 15.5px;
+  line-height: 1.5;
+}
+
+.summary-list li::before {
+  content: "";
+  position: absolute;
+  left: -19px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* --- detail: who spoke --------------------------------------------------- */
+
+.stats { margin-bottom: 34px; }
+.statlist { margin: 0; padding: 0; list-style: none; }
+
+.statrow {
+  display: grid;
+  grid-template-columns: minmax(90px, 150px) minmax(80px, 1fr) 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.statrow:last-child { border-bottom: none; }
+
+.statname {
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statbar {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.statbar-fill { display: block; height: 100%; background: var(--accent); opacity: 0.85; }
+
+.statshare {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.statfacts {
+  grid-column: 1 / -1;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- detail: screenplay --------------------------------------------------
+ * A meeting transcript IS a screenplay: named cues over dialogue, in order,
+ * with the clock in the gutter. The cue takes the speaker's accent and holds
+ * it for the whole document, so the eye tracks a person down the page without
+ * reading a single name after the first.
+ */
+
+.screenplay {
+  border-top: 1px solid var(--line);
+}
+
+.scene {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 0 16px;
+  padding: 16px 0 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.scene-clock {
+  padding-top: 3px;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scene-body { min-width: 0; }
+
+.cue {
+  margin: 0 0 5px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.dialogue {
+  margin: 0;
+  /* Long-form reading, so this is the only place on the site that is allowed
+   * to be a paragraph: serif, 17px, generous leading, measure capped. */
+  max-width: 68ch;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: 0.002em;
+}
+
+/* --- detail: audio tracks ------------------------------------------------ */
+
+.tracks { margin-bottom: 20px; }
+.tracklist { margin: 0; padding: 0; list-style: none; }
+
+.trackrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.trackrow:last-child { border-bottom: none; }
+
+.trackfact {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- live: transport ----------------------------------------------------- */
+
+.transport {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(200px, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 28px;
+  margin: 0 0 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+}
+
+.transport[data-status="recording"] {
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
+  background: var(--ink-raised-2);
+}
+
+.transport-clock { display: flex; align-items: center; gap: 12px; }
+
+.rec-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-dimmer);
+}
+
+.transport[data-status="recording"] .rec-dot { background: var(--live); }
+
+.timer {
+  color: var(--text);
+  font-family: var(--font-mono);
+  /* The one number in the product a person watches from across the room. */
+  font-size: 40px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.transport[data-status="idle"] .timer { color: var(--text-dimmer); }
+
+.transport-state {
+  color: var(--text-dimmer);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+}
+
+.transport[data-status="recording"] .transport-state { color: var(--live); }
+
+/* --- live: meters -------------------------------------------------------- */
+
+.meters { display: grid; gap: 9px; min-width: 0; }
+
+.meter {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 10px;
+}
+
+.meter-label {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.meter-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--live);
+}
+
+.meter[data-meter="system"] .meter-fill { background: #4493f8; }
+
+/* An idle recorder reports 0.0 forever; greying the fill says "not listening"
+ * rather than "silent", which are different facts. */
+.transport[data-status="idle"] .meter-fill { background: var(--text-dimmer); }
+
+.meter-value {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* --- live: buttons ------------------------------------------------------- */
+
+.transport-buttons { display: flex; gap: 10px; }
+
+.transport-btn {
+  padding: 11px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.transport-btn.is-start:hover:not([disabled]) {
+  border-color: color-mix(in srgb, var(--live) 55%, transparent);
+  color: var(--live);
+}
+
+.transport-btn.is-stop:hover:not([disabled]) {
+  border-color: color-mix(in srgb, var(--fail) 55%, transparent);
+  color: var(--fail);
+}
+
+.transport-btn:active:not([disabled]) { transform: translateY(1px); }
+.transport-btn[disabled] { opacity: 0.34; cursor: default; transform: none; }
+.transport-btn:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
+
+/* --- live: disk note ----------------------------------------------------- */
+
+.disk-note {
+  margin: 0 0 22px;
+  padding: 10px 15px;
+  border: 1px solid color-mix(in srgb, var(--hold) 38%, transparent);
+  border-radius: 10px;
+  color: var(--hold);
+  font-size: 14px;
+}
+
+.disk-note[data-state="full"] {
+  border-color: color-mix(in srgb, var(--fail) 45%, transparent);
+  color: var(--fail);
+}
+
+/* --- live: captions ------------------------------------------------------ */
+
+.captions { border-top: 1px solid var(--line); }
+
+/* board.css gives .empty-state `display: flex`, and an author display beats the
+ * user-agent's `[hidden] { display: none }` — so the "nothing said yet" panel
+ * stayed on screen underneath the first caption. Restated here at higher
+ * specificity rather than patched in JavaScript, because the element is hidden
+ * by the `hidden` attribute and that attribute should mean what it says. */
+.empty-state[hidden] { display: none; }
+
+.caption {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 0 16px;
+  padding: 13px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.caption-clock {
+  padding-top: 2px;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.caption-body { min-width: 0; }
+
+.caption-who {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+/* Two tracks, two colours, held for the session — the same grammar the
+ * screenplay uses for people. */
+.caption[data-track="mic"]    { --accent: #4ade80; }
+.caption[data-track="system"] { --accent: #4493f8; }
+
+.caption-text {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+/* A partial is what the recogniser has heard but not committed to. Shown,
+ * because waiting for a final turn makes the page look dead mid-sentence —
+ * and dimmed, because it is going to change. */
+.caption[data-partial="true"] .caption-text { color: var(--text-dim); font-style: italic; }
+
+/* --- narrow screens ------------------------------------------------------ */
+
+@media (max-width: 720px) {
+  .transport { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .timer { font-size: 34px; }
+  .scene, .caption { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .scene-clock, .caption-clock { padding-top: 0; }
+  .statrow { grid-template-columns: minmax(0, 1fr) 46px; }
+  .statbar { grid-column: 1 / -1; }
+  .followthrough { flex-wrap: wrap; }
+}
+
+/* --- motion --------------------------------------------------------------
+ * board.css's rule, kept exactly: nothing is animated outside this block, so
+ * prefers-reduced-motion has nothing to undo.
+ */
+
+@media (prefers-reduced-motion: no-preference) {
+  .meter-fill { transition: width 140ms linear, background-color 200ms ease; }
+  .statbar-fill { transition: width 400ms cubic-bezier(0.16, 1, 0.3, 1); }
+  .mrow, .transport-btn, .searchgo, .followthrough {
+    transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  }
+
+  .transport[data-status="recording"] .rec-dot {
+    animation: rec-pulse 2s ease-out infinite;
+  }
+
+  @keyframes rec-pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 45%, transparent); }
+    70%  { box-shadow: 0 0 0 14px rgba(74, 222, 128, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  }
+
+  .caption.is-entering {
+    animation: caption-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes caption-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+  }
+}

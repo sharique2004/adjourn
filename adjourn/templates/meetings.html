@@ -1,0 +1,237 @@
+{#
+  The Meetings tab. One template, two views (library + live), and — as in
+  board.html — every repeated piece of markup lives in a macro so the search
+  fragment re-renders exactly what the server-rendered page already showed.
+  There is no second copy of a row in JavaScript.
+
+  meeting_detail.html imports the shared macros from here, which is why the
+  page body below is guarded: importing a macro executes this template's top
+  level, and without the guard that would try to render a whole page with no
+  state.
+#}
+
+{#- the leading dash keeps the page starting at <!doctype>, byte zero -#}
+{%- macro tabbar(current) -%}
+{#- Stage 2's tab bar, rendered now so mounting the blueprint changes markup
+    nowhere. The two tabs this lane owns are real routes; the other three are
+    plain hrefs to the board's paths, which is the whole contract — this lane
+    does not touch board_server.py. -#}
+<nav class="viewbar" aria-label="Sections">
+  <a class="viewlink {{ 'is-current' if current == 'meetings' else '' }}" href="{{ url_for('meetings.library') }}">Meetings</a>
+  <a class="viewlink {{ 'is-current' if current == 'live' else '' }}" href="{{ url_for('meetings.live_view') }}">Live</a>
+  <a class="viewlink" href="/">Follow-through</a>
+  <a class="viewlink" href="/ledger">Ledger</a>
+  <a class="viewlink" href="/connections">Connections</a>
+</nav>
+{%- endmacro -%}
+
+{%- macro status_chip(status, label) -%}
+<span class="chip chip-status" data-status="{{ status }}">{{ label }}</span>
+{%- endmacro -%}
+
+{%- macro engine_badge(online) -%}
+{#- The same live/SIM grammar the board's cards use, pointed at the engine:
+    green dot means a real process answered on loopback, grey means we are
+    reading files off disk and saying so. -#}
+{% if online %}
+  <span class="badge badge-live"><span class="dot"></span>ENGINE</span>
+{% else %}
+  <span class="badge badge-sim">OFFLINE</span>
+{% endif %}
+{%- endmacro -%}
+
+{% macro meeting_row(row) -%}
+<a class="card mrow" href="{{ url_for('meetings.detail', meeting_id=row.id) }}"
+   data-status="{{ row.status }}" data-key="{{ row.id }}">
+  <div class="card-rail" aria-hidden="true"></div>
+  <div class="card-body">
+    <header class="card-top">
+      {{ status_chip(row.status, row.status_label) }}
+      {% if row.has_summary %}<span class="badge badge-quiet">SUMMARY</span>{% endif %}
+      {% if row.has_notes %}<span class="badge badge-quiet">NOTES</span>{% endif %}
+      {% if row.warning_count %}
+        <span class="badge badge-holding" title="{{ row.warnings | join(' · ') }}">
+          {{ row.warning_count }} WARNING{{ '' if row.warning_count == 1 else 'S' }}
+        </span>
+      {% endif %}
+      <span class="spacer"></span>
+      <time class="stamp" datetime="{{ row.created }}">{{ row.created_label }}</time>
+    </header>
+
+    <h2 class="headline">{{ row.title }}</h2>
+
+    {% if row.brief %}<p class="mrow-brief">{{ row.brief }}</p>{% endif %}
+
+    <footer class="mrow-foot">
+      <span class="mrow-fact">{{ row.duration_label }}</span>
+      <span class="mrow-fact">{{ row.speakers }} speaker{{ '' if row.speakers == 1 else 's' }}</span>
+      {% if not row.has_transcript %}<span class="mrow-fact is-absent">no transcript</span>{% endif %}
+      <span class="spacer"></span>
+      <span class="external-id">{{ row.id }}</span>
+    </footer>
+  </div>
+</a>
+{%- endmacro %}
+
+{% macro meeting_rows(library) -%}
+{#- The list body ONLY. /api/rows re-renders this macro for search, so anything
+    outside it (the count, the masthead) must not live in here. -#}
+{% if library.rows %}
+<ol class="mlist">
+  {% for row in library.rows %}<li>{{ meeting_row(row) }}</li>{% endfor %}
+</ol>
+{% else %}
+<section class="empty-state">
+  <span class="empty-pulse" aria-hidden="true"></span>
+  <p class="empty-line">{% if library.query %}Nothing matches &ldquo;{{ library.query }}&rdquo;.{% else %}No recordings yet.{% endif %}</p>
+</section>
+{% endif %}
+{%- endmacro %}
+
+{%- macro meter(name, label, value) -%}
+<div class="meter" data-meter="{{ name }}">
+  <span class="meter-label">{{ label }}</span>
+  <div class="meter-track">
+    <div class="meter-fill" data-meter-fill="{{ name }}" style="width: {{ (value * 100) | round | int }}%"></div>
+  </div>
+  <span class="meter-value" data-meter-value="{{ name }}">{{ (value * 100) | round | int }}</span>
+</div>
+{%- endmacro -%}
+
+{% if page is defined %}
+<!doctype html>
+<html lang="en" data-view="{{ page }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page == 'live' %}Live · Adjourn{% else %}Meetings · Adjourn{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
+  <link rel="stylesheet" href="{{ url_for('meetings.static', filename='meetings.css') }}">
+</head>
+<body data-view="{{ page }}">
+
+{% if page == 'library' %}
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <h1 class="meeting-title">Meetings</h1>
+      <p class="meeting-meta">
+        <span class="meta-item totals" data-total-count>{{ library.total }} recording{{ '' if library.total == 1 else 's' }}</span>
+        <span class="meta-item totals" data-total-hours>{{ (library.total_seconds / 3600) | round(1) }} hours</span>
+        <span class="meta-item">{{ engine_badge(library.online) }}</span>
+        {% if library.recording_now %}
+        <span class="meta-item"><a class="link" href="{{ url_for('meetings.live_view') }}">one is recording now</a></span>
+        {% endif %}
+      </p>
+    </div>
+    <p class="tagline">Every meeting this machine heard.</p>
+  </div>
+</header>
+
+{{ tabbar(current_tab) }}
+
+<main class="mpage">
+  {% if not library.online %}
+  <p class="source-note">
+    The MeetingScribe engine is not answering on {{ library.base_url }} — these rows
+    are read straight off disk, so briefs and note badges are missing.
+  </p>
+  {% endif %}
+
+  <form class="searchbar" role="search" data-search action="{{ url_for('meetings.library') }}" method="get">
+    <label class="sr-only" for="msearch">Search meetings</label>
+    <input class="searchfield" type="search" id="msearch" name="q" value="{{ library.query }}"
+           placeholder="Search titles and speakers…" autocomplete="off" spellcheck="false">
+    <button class="searchgo" type="submit">Search</button>
+  </form>
+
+  <h2 class="column-title">
+    Library
+    <span class="column-count" data-row-count>{{ library.total }}</span>
+    <span class="searching" data-searching hidden>searching…</span>
+  </h2>
+
+  <div id="rows" data-rows>{{ meeting_rows(library) }}</div>
+</main>
+{% endif %}
+
+{% if page == 'live' %}
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <h1 class="meeting-title">Live</h1>
+      <p class="meeting-meta">
+        <span class="meta-item">{{ engine_badge(live.online) }}</span>
+        <span class="meta-item mode-note">captured on this machine, nothing leaves it</span>
+      </p>
+    </div>
+    <p class="tagline">What is being said, as it is said.</p>
+  </div>
+</header>
+
+{{ tabbar(current_tab) }}
+
+<main class="mpage" data-live
+      data-recording="{{ 'true' if live.recording else 'false' }}"
+      data-elapsed="{{ live.elapsed }}"
+      data-online="{{ 'true' if live.online else 'false' }}">
+
+  {% if not live.online %}
+  <p class="source-note">
+    The MeetingScribe engine is not answering on {{ live.base_url }}. Start it and
+    reload — the controls below stay disabled until it does.
+  </p>
+  {% endif %}
+
+  <section class="transport" data-status="{{ 'recording' if live.recording else 'idle' }}" data-transport>
+    <div class="transport-clock">
+      <span class="rec-dot" aria-hidden="true"></span>
+      <span class="timer" data-timer>{{ live.elapsed_clock }}</span>
+      <span class="transport-state" data-state-label>{{ 'RECORDING' if live.recording else 'IDLE' }}</span>
+    </div>
+
+    <div class="meters">
+      {{ meter('mic', 'MIC', live.mic_level) }}
+      {{ meter('system', 'SYSTEM', live.system_level) }}
+    </div>
+
+    <div class="transport-buttons">
+      <button class="transport-btn is-start" type="button" data-start
+              {{ 'disabled' if (live.recording or not live.online) else '' }}>Start recording</button>
+      <button class="transport-btn is-stop" type="button" data-stop
+              {{ 'disabled' if (not live.recording or not live.online) else '' }}>Stop</button>
+    </div>
+  </section>
+
+  {% if live.disk_message %}
+  <p class="disk-note" data-disk data-state="{{ live.disk_state }}">{{ live.disk_message }}</p>
+  {% else %}
+  <p class="disk-note" data-disk hidden></p>
+  {% endif %}
+
+  <h2 class="column-title">
+    Captions
+    <span class="column-count" data-caption-count>0</span>
+  </h2>
+
+  <section class="captions" data-captions aria-live="polite">
+    <div class="empty-state" data-captions-empty>
+      <span class="empty-pulse" aria-hidden="true"></span>
+      <p class="empty-line">Nothing being said yet.</p>
+    </div>
+  </section>
+</main>
+{% endif %}
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<footer class="footfall">
+  <span>Adjourn</span>
+  <span class="dot-sep">·</span>
+  <span>local-first · the engine is the only source of truth on this page</span>
+</footer>
+
+<script src="{{ url_for('meetings.static', filename='meetings.js') }}" defer></script>
+</body>
+</html>
+{% endif %}

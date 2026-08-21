@@ -1,0 +1,195 @@
+{#
+  One meeting, read rather than scanned.
+
+  The shared chrome comes from meetings.html by import — WITHOUT context, which
+  is what keeps that template's guarded page body from trying to render here.
+  The macros only need url_for, and that is a Jinja global.
+#}
+{% from "meetings.html" import tabbar, status_chip, engine_badge %}
+<!doctype html>
+<html lang="en" data-view="detail">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if meeting %}{{ meeting.title }} · Adjourn{% else %}Not found · Adjourn{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
+  <link rel="stylesheet" href="{{ url_for('meetings.static', filename='meetings.css') }}">
+</head>
+<body data-view="detail">
+
+{% if not meeting %}
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <h1 class="meeting-title">Not found</h1>
+      <p class="meeting-meta">
+        <span class="meta-item">No recording answers to <span class="external-id">{{ not_found }}</span>.</span>
+      </p>
+    </div>
+  </div>
+</header>
+{{ tabbar('meetings') }}
+<main class="mpage">
+  <section class="empty-state">
+    <span class="empty-pulse" aria-hidden="true"></span>
+    <p class="empty-line">Neither the engine nor the recordings folder has that meeting.</p>
+    <a class="link" href="{{ url_for('meetings.library') }}">Back to the library</a>
+  </section>
+</main>
+
+{% else %}
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <p class="crumb"><a class="link" href="{{ url_for('meetings.library') }}">&larr; Meetings</a></p>
+      <h1 class="meeting-title">{{ meeting.title }}</h1>
+      <p class="meeting-meta">
+        <span class="meta-item">{{ status_chip(meeting.status, meeting.status_label) }}</span>
+        <span class="meta-item">{{ meeting.created_label }}</span>
+        <span class="meta-item totals">{{ meeting.duration_label }}</span>
+        <span class="meta-item totals">{{ meeting.speakers }} speaker{{ '' if meeting.speakers == 1 else 's' }}</span>
+        <span class="meta-item totals">{{ '{:,}'.format(meeting.word_count) }} words</span>
+      </p>
+    </div>
+    <p class="tagline">{{ meeting.duration_clock }} of it.</p>
+  </div>
+</header>
+
+{{ tabbar('meetings') }}
+
+<main class="mpage mdetail">
+
+  {# The cross-link into the board. A stub by contract: this lane does not touch
+     board_server.py, so the target may not exist until Stage 2 mounts it. #}
+  <a class="followthrough" href="{{ meeting.follow_through_url }}">
+    <span class="followthrough-label">Follow-through</span>
+    <span class="followthrough-copy">What this meeting caused &mdash; on the board</span>
+    <span class="followthrough-arrow" aria-hidden="true">&rarr;</span>
+  </a>
+
+  {% if meeting.warnings %}
+  <section class="warnings">
+    <h2 class="column-title">Capture notes <span class="column-count">{{ meeting.warnings | length }}</span></h2>
+    <ul class="warnlist">
+      {% for warning in meeting.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if meeting.summary %}
+  <section class="summary">
+    <h2 class="column-title">
+      Summary
+      {% if meeting.summary.engine %}<span class="column-count">{{ meeting.summary.engine }}</span>{% endif %}
+    </h2>
+    <div class="card summary-card">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        {% if meeting.summary.headline %}
+        <h3 class="headline">{{ meeting.summary.headline }}</h3>
+        {% endif %}
+        {% if meeting.summary.tldr %}
+        <p class="summary-tldr">{{ meeting.summary.tldr }}</p>
+        {% endif %}
+
+        {% for group in [
+             ('Decisions', meeting.summary.decisions),
+             ('Action items', meeting.summary.action_items),
+             ('Key points', meeting.summary.key_points),
+             ('Open questions', meeting.summary.open_questions),
+             ('Follow-ups', meeting.summary.follow_ups)] %}
+          {% if group[1] %}
+          <div class="summary-group">
+            <h4 class="summary-group-title">{{ group[0] }}</h4>
+            <ul class="summary-list">
+              {% for line in group[1] %}<li>{{ line }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if meeting.speaker_stats %}
+  <section class="stats">
+    <h2 class="column-title">Who spoke <span class="column-count">{{ meeting.speaker_stats | length }}</span></h2>
+    <ul class="statlist">
+      {% for person in meeting.speaker_stats %}
+      <li class="statrow" style="--accent: {{ person.accent }}">
+        <span class="statname">{{ person.name }}</span>
+        <span class="statbar"><span class="statbar-fill" style="width: {{ person.share_pct }}%"></span></span>
+        <span class="statshare">{{ person.share_pct }}%</span>
+        <span class="statfacts">
+          {{ person.duration_label }} · {{ '{:,}'.format(person.words) }} words ·
+          {{ person.wpm }} wpm · {{ person.questions }} question{{ '' if person.questions == 1 else 's' }}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="transcript">
+    <h2 class="column-title">
+      Transcript
+      <span class="column-count">{{ meeting.turn_count }} turn{{ '' if meeting.turn_count == 1 else 's' }}</span>
+    </h2>
+
+    {% if meeting.screenplay %}
+    <div class="screenplay">
+      {% for block in meeting.screenplay %}
+      <article class="scene" style="--accent: {{ block.accent }}" data-track="{{ block.track }}">
+        <span class="scene-clock">{{ block.clock }}</span>
+        <div class="scene-body">
+          <h3 class="cue">{{ block.name }}</h3>
+          <p class="dialogue">{{ block.text }}</p>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <section class="empty-state">
+      <span class="empty-pulse" aria-hidden="true"></span>
+      <p class="empty-line">
+        {% if meeting.status == 'processing' %}Still being transcribed.{% else %}No transcript for this recording.{% endif %}
+      </p>
+    </section>
+    {% endif %}
+  </section>
+
+  {% if meeting.tracks %}
+  <section class="tracks">
+    <h2 class="column-title">Audio</h2>
+    <ul class="tracklist">
+      {% for track in meeting.tracks %}
+      <li class="trackrow">
+        <span class="chip chip-small">{{ track.name | upper }}</span>
+        <span class="trackfact">{{ track.device }}</span>
+        <span class="trackfact">{{ track.duration_label }}</span>
+        <span class="trackfact">{{ (track.rate / 1000) | round | int }} kHz {{ track.codec }}</span>
+      </li>
+      {% endfor %}
+      {% if meeting.engine_model %}
+      <li class="trackrow">
+        <span class="chip chip-small">MODEL</span>
+        <span class="trackfact">{{ meeting.engine_model }}</span>
+        <span class="trackfact">{{ meeting.engine_backend }}</span>
+      </li>
+      {% endif %}
+    </ul>
+  </section>
+  {% endif %}
+</main>
+{% endif %}
+
+<footer class="footfall">
+  <span>Adjourn</span>
+  <span class="dot-sep">·</span>
+  <span>local-first · the engine is the only source of truth on this page</span>
+</footer>
+
+</body>
+</html>

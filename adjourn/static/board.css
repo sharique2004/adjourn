@@ -1,0 +1,832 @@
+/* Adjourn board — dark, high-contrast, meant to be read from across a room.
+ *
+ * Sizing rule of thumb used throughout: the headline of a card is the thing a
+ * founder reads from 1.5m, so it never drops below 20px and never competes with
+ * a chip or a badge for attention. Everything else is deliberately quieter.
+ */
+
+:root {
+  --ink:            #0a0b0d;
+  --ink-raised:     #131519;
+  --ink-raised-2:   #171a1f;
+  --line:           rgba(255, 255, 255, 0.07);
+  --line-strong:    rgba(255, 255, 255, 0.14);
+
+  --text:           #f2f4f7;
+  --text-dim:       #b3bac6;   /* 9.4:1 on the card — was #9aa1ad, 4.2:1 */
+  --text-dimmer:    #949ba7;   /* 6.6:1 on the card — was #6d7480, 3.9:1 */
+
+  --live:           #4ade80;
+  /* The SIM badge is the product: "I'd rather show you a badge that says 'sim'
+   * than a demo that quietly fakes the send" is the line, and in the recommended
+   * demo mode ten of eleven cards wear it. At #7c828d it was 3.86:1 — failing
+   * WCAG AA, 3.1x dimmer than the LIVE badge beside it, and the least legible
+   * thing on a board whose argument is that you can read what it did. ~10:1 now:
+   * as loud as LIVE, just not green. */
+  --sim:            #b9c0cb;
+  --fail:           #f0616d;
+  --hold:           #e8b339;
+
+  --accent:         #8b93a7;  /* per-card override below */
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+               system-ui, "Segoe UI", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+                Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius: 14px;
+  --page: 1080px;
+}
+
+/* One accent per action kind. Linear's two kinds share a family on purpose —
+ * create and move are the same surface doing two things. */
+[data-kind="github_update"]     { --accent: #a371f7; }
+[data-kind="pull_request_stub"] { --accent: #4493f8; }
+[data-kind="pr_review_suggestion"] { --accent: #6bb1ff; }
+[data-kind="linear_create"]     { --accent: #5e6ad2; }
+[data-kind="linear_move"]       { --accent: #8b93e8; }
+[data-kind="slack_send"]        { --accent: #2eb67d; }
+[data-kind="email_send"]        { --accent: #e8a33d; }
+[data-kind="calendar_hold"]     { --accent: #f2585b; }
+[data-kind="recap_page"]        { --accent: #d6c8a6; }
+
+* { box-sizing: border-box; }
+
+html { background: var(--ink); }
+
+body {
+  margin: 0;
+  padding: 0 24px 96px;
+  background:
+    radial-gradient(1200px 480px at 50% -180px, rgba(255, 255, 255, 0.045), transparent 70%),
+    var(--ink);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.spacer { flex: 1 1 auto; }
+
+/* --- masthead ------------------------------------------------------------ */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 auto;
+  max-width: var(--page);
+  padding: 26px 0 18px;
+  background: linear-gradient(var(--ink) 72%, rgba(10, 11, 13, 0));
+}
+
+.masthead-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}
+
+.meeting-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 640;
+  letter-spacing: -0.022em;
+  line-height: 1.15;
+}
+
+.meeting-meta {
+  margin: 7px 0 0;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 14.5px;
+}
+
+.meta-item + .meta-item::before {
+  content: "·";
+  margin-right: 10px;
+  color: var(--text-dimmer);
+}
+
+.totals { color: var(--text); font-variant-numeric: tabular-nums; }
+.mode-note { color: var(--text-dimmer); font-style: italic; }
+
+.tagline {
+  margin: 0 0 3px auto;
+  color: var(--text-dimmer);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+/* --- view switch --------------------------------------------------------- */
+
+/* Five tabs now, on every page this app serves — Meetings · Live ·
+ * Follow-through · Ledger · Connections. Sized for two, they overflowed a
+ * narrow window and "Follow-through" broke across two lines inside its pill.
+ * The BAR wraps and the words do not, so every tab stays one pill tall.
+ * (meetings.css carries the identical pair for the pages it styles; keeping it
+ * here is what makes the board-served pages behave the same.) */
+.viewbar {
+  margin: 14px auto 22px;
+  max-width: var(--page);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.viewbar .viewlink { white-space: nowrap; }
+
+.viewlink {
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-dimmer);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+
+.viewlink:hover { color: var(--text-dim); }
+
+.viewlink.is-current {
+  border-color: var(--line-strong);
+  background: var(--ink-raised);
+  color: var(--text);
+}
+
+/* --- columns ------------------------------------------------------------- */
+
+.board, .ledger {
+  margin: 0 auto;
+  max-width: var(--page);
+}
+
+.column { margin-bottom: 34px; }
+
+.column-title {
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-dimmer);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.column-count {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- card ---------------------------------------------------------------- */
+
+.card {
+  position: relative;
+  display: flex;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.card-rail {
+  flex: 0 0 4px;
+  background: var(--accent);
+  opacity: 0.95;
+}
+
+.card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 16px 18px 14px;
+}
+
+.card[data-state="failed"] { background: var(--ink-raised-2); }
+.card[data-state="failed"] .card-rail { background: var(--fail); }
+.card[data-state="undone"] { opacity: 0.55; }
+.card[data-state="undone"] .headline { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+/* A countdown a human stopped. Dimmed like an undone card, but the rail goes
+ * neutral rather than keeping the kind's colour — nothing of this kind ran. */
+.card[data-state="cancelled"] { opacity: 0.6; background: var(--ink-raised-2); }
+.card[data-state="cancelled"] .card-rail { background: var(--text-dimmer); }
+.card[data-state="cancelled"] .headline {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+
+.chip {
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.chip-small { font-size: 10.5px; padding: 2px 7px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  /* 11px subtended ~3.8 arcmin from 1.5m on this laptop; the legibility floor is
+   * ~8-10. Still small, but the mode badge is now the size of a thing meant to
+   * be read rather than a thing meant to be inferred. */
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+}
+
+.badge-live {
+  background: color-mix(in srgb, var(--live) 16%, transparent);
+  color: var(--live);
+  border: 1px solid color-mix(in srgb, var(--live) 40%, transparent);
+}
+
+.badge-live .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+}
+
+.badge-sim {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--sim);
+  border: 1px solid var(--line-strong);
+}
+
+.badge-failed {
+  background: color-mix(in srgb, var(--fail) 15%, transparent);
+  color: var(--fail);
+  border: 1px solid color-mix(in srgb, var(--fail) 40%, transparent);
+}
+
+.badge-undone {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dimmer);
+  border: 1px solid var(--line-strong);
+}
+
+.badge-holding {
+  background: color-mix(in srgb, var(--hold) 15%, transparent);
+  color: var(--hold);
+  border: 1px solid color-mix(in srgb, var(--hold) 38%, transparent);
+}
+
+.stamp, .elapsed {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.headline {
+  margin: 0;
+  font-size: 20.5px;
+  font-weight: 560;
+  line-height: 1.32;
+  letter-spacing: -0.012em;
+  color: var(--text);
+}
+
+.quote {
+  margin: 10px 0 0;
+  padding-left: 13px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-dim);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.quote-speaker {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dimmer);
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.card-bottom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 13px;
+}
+
+.link {
+  color: var(--accent);
+  font-size: 13.5px;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.link:hover { border-bottom-color: var(--accent); }
+
+.external-id {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.undo-note {
+  color: var(--text-dimmer);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+.undo {
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.undo:hover {
+  border-color: color-mix(in srgb, var(--fail) 55%, transparent);
+  color: var(--fail);
+}
+
+.undo:active { transform: translateY(1px); }
+.undo[disabled] { opacity: 0.4; cursor: default; transform: none; }
+.undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --- pending / countdown ------------------------------------------------- */
+
+.card-pending { background: var(--ink-raised-2); }
+
+.pending-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pending-copy { flex: 1 1 auto; min-width: 0; }
+.pending-copy .headline { font-size: 20.5px; }
+
+.ring-wrap {
+  position: relative;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+}
+
+.ring { display: block; transform: rotate(-90deg); }
+
+.ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 3;
+}
+
+.ring-progress {
+  fill: none;
+  stroke: var(--hold);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hold);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- empty state --------------------------------------------------------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 96px 0 110px;
+  text-align: center;
+}
+
+.empty-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dimmer);
+  box-shadow: 0 0 0 0 rgba(154, 161, 173, 0.35);
+}
+
+.empty-line {
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 21px;
+  letter-spacing: 0.01em;
+}
+
+/* --- ledger -------------------------------------------------------------- */
+
+.ledger-lede {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 16px;
+}
+
+.source-note {
+  margin: 0 0 26px;
+  color: var(--text-dimmer);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.person {
+  margin-bottom: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.person-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.avatar {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.person-name { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.person-meta { margin: 3px 0 0; color: var(--text-dimmer); font-size: 13px; }
+
+.kind-tally { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.tally {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.commitments { margin: 0; padding: 0; list-style: none; }
+
+.commitment {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.commitment:last-child { border-bottom: none; }
+.commitment[data-state="undone"] { opacity: 0.5; }
+.commitment[data-state="undone"] .commitment-summary { text-decoration: line-through; }
+
+.commitment-rail { flex: 0 0 3px; background: var(--accent); opacity: 0.8; }
+.commitment-body { flex: 1 1 auto; min-width: 0; padding: 13px 18px; }
+
+.commitment-summary { margin: 0; font-size: 16.5px; line-height: 1.4; }
+.commitment .quote { margin-top: 7px; font-size: 15px; }
+
+.commitment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 9px 0 0;
+}
+
+/* --- toast --------------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: 560px;
+  padding: 11px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #1c1f25;
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+
+.toast[data-tone="bad"] { border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+.toast[data-tone="good"] { border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+
+/* --- footer -------------------------------------------------------------- */
+
+.footfall {
+  margin: 46px auto 0;
+  max-width: var(--page);
+  display: flex;
+  gap: 9px;
+  color: var(--text-dimmer);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.dot-sep { color: var(--line-strong); }
+
+/* --- motion --------------------------------------------------------------
+ * Everything animated is opt-in: no animation is declared outside this block,
+ * so prefers-reduced-motion does not need to undo anything.
+ */
+
+@media (prefers-reduced-motion: no-preference) {
+  .card.is-entering {
+    animation: card-slide-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes card-slide-in {
+    from { opacity: 0; transform: translateY(-10px) scale(0.995); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .empty-pulse { animation: empty-pulse 2.6s ease-out infinite; }
+
+  @keyframes empty-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(154, 161, 173, 0.32); }
+    70%  { box-shadow: 0 0 0 18px rgba(154, 161, 173, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(154, 161, 173, 0); }
+  }
+
+  .ring-progress { transition: stroke-dashoffset 240ms linear; }
+  .undo, .link, .viewlink { transition: color 120ms ease, border-color 120ms ease; }
+  .toast { transition: opacity 160ms ease; }
+}
+
+
+/* --- guts panel (pipeline inner workings) -------------------------------- */
+
+.guts {
+  margin: 0 auto 22px;
+  max-width: var(--page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+/* The panel is a <details> whose <summary> carries every live number, so the
+ * pipeline stays on screen at ~44px instead of ~250px and the pinned cards clear
+ * the fold at the runbook's own 175% presentation zoom. Measured, not guessed —
+ * see the comment on guts_panel() in templates/board.html. */
+.guts-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+.guts-head::-webkit-details-marker { display: none; }
+.guts[open] .guts-head { border-bottom: 1px solid var(--line); }
+
+.guts-strip {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.guts-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.guts-chip-label {
+  color: var(--text-dimmer);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.guts-chip[data-phase="running"],
+.guts-chip[data-phase="pending"],
+.guts-chip[data-phase="meeting_stopped"] { color: var(--hold); }
+
+.guts-chip[data-phase="done"],
+.guts-chip[data-phase="transcript_ready"] { color: var(--live); }
+
+.guts-chip[data-phase="idle"],
+.guts-chip[data-phase="waiting"] { color: var(--text-dim); }
+
+.guts-toggle {
+  color: var(--text-dimmer);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.guts[open] .guts-toggle::after { content: " ▴"; }
+.guts:not([open]) .guts-toggle::after { content: " ▾"; }
+
+/* PRESENTATION ZOOM. 175% on a 1512px window is an 864x514 CSS viewport, and at
+ * that size the pinned card's last four pixels fell below the fold — close
+ * enough to look deliberate and wrong enough to matter, because the card the
+ * whole narration is built around should be entirely on the first screen. This
+ * block buys ~30px back from chrome nobody reads. Keyed on viewport HEIGHT, so
+ * it only fires when the screen is short: a laptop at 100% is untouched. */
+@media (max-height: 640px) {
+  .masthead { padding: 12px 0 10px; }
+  .masthead-inner { padding-bottom: 10px; }
+  .viewbar { margin: 8px auto 12px; }
+  .guts { margin-bottom: 14px; }
+  .guts-head { padding: 8px 16px; }
+}
+
+/* --- crosslinks (one meeting's page) ------------------------------------- */
+
+.crosslinks {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+}
+
+/* A tab whose Blueprint did not mount. Present, named, and honestly dead. */
+.viewlink.is-down {
+  color: var(--text-dimmer);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.guts-title {
+  margin: 0;
+  color: var(--text-dimmer);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.guts-pass {
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.guts-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.guts-stage {
+  padding: 12px 16px 14px;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+
+.guts-stage:last-child { border-right: none; }
+
+.guts-label {
+  margin: 0 0 6px;
+  color: var(--text-dimmer);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.guts-headline {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.guts-detail {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.guts-stage[data-phase="running"] .guts-headline,
+.guts-stage[data-phase="pending"] .guts-headline,
+.guts-stage[data-phase="meeting_stopped"] .guts-headline {
+  color: var(--hold);
+}
+
+.guts-stage[data-phase="done"] .guts-headline,
+.guts-stage[data-phase="transcript_ready"] .guts-headline {
+  color: var(--live);
+}
+
+.guts-stage[data-phase="waiting"] .guts-headline {
+  color: var(--text-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .guts-stage[data-phase="running"] .guts-headline,
+  .guts-stage[data-phase="waiting"] .guts-headline,
+  .guts-stage[data-phase="pending"] .guts-headline {
+    animation: guts-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes guts-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+}
+
+@media (max-width: 720px) {
+  .guts-stages { grid-template-columns: 1fr 1fr; }
+  .guts-stage:nth-child(2) { border-right: none; }
+  .guts-stage:nth-child(1),
+  .guts-stage:nth-child(2) { border-bottom: 1px solid var(--line); }
+}
+
+/* --- narrow screens ------------------------------------------------------ */
+
+@media (max-width: 720px) {
+  body { padding: 0 14px 72px; }
+  .meeting-title { font-size: 25px; }
+  .tagline { margin-left: 0; }
+  .headline { font-size: 20px; }  /* the floor the file's own header promises */
+  .pending-row { flex-wrap: wrap; }
+}

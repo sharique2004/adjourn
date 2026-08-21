@@ -1,0 +1,10 @@
+{"type":"meta","meeting_id":"pr-review-beat","title":"MMM Standup — PR review beat","date":"2026-08-21"}
+{"type":"segment","segment_id":"prb-s01","speaker":"You","track":"mic","start":0.0,"end":3.8,"text":"Two more things and then I'll let you go eat."}
+{"type":"segment","segment_id":"prb-s02","speaker":"Them","track":"system","start":4.1,"end":6.0,"text":"I'm listening. Go."}
+{"type":"segment","segment_id":"prb-s03","speaker":"You","track":"mic","start":6.3,"end":13.9,"text":"Did you look at the beta signup page? Priya pushed it up this afternoon, the join the beta thing."}
+{"type":"segment","segment_id":"prb-s04","speaker":"Them","track":"system","start":14.2,"end":20.7,"text":"I skimmed it on my phone in the elevator. Copy's good. Shorter than I expected, which is a compliment."}
+{"type":"segment","segment_id":"prb-s05","speaker":"You","track":"mic","start":21.0,"end":32.6,"text":"Yeah, the copy's fine. But on Priya's join button PR — pull six — that green is wrong. It should be our slate blue, six B seven F nine nine."}
+{"type":"segment","segment_id":"prb-s06","speaker":"Them","track":"system","start":32.9,"end":39.4,"text":"Six B seven F nine nine. Right, the one out of the deck. I always have to look that up."}
+{"type":"segment","segment_id":"prb-s07","speaker":"You","track":"mic","start":39.7,"end":47.1,"text":"It's the only green anywhere on the site. It doesn't read as a brand colour, it reads as a bug someone hasn't noticed yet."}
+{"type":"segment","segment_id":"prb-s08","speaker":"Them","track":"system","start":47.4,"end":54.8,"text":"No, you're right. It's one line in the stylesheet, she can turn that around before Friday without breaking a sweat."}
+{"type":"segment","segment_id":"prb-s09","speaker":"You","track":"mic","start":55.1,"end":58.3,"text":"That's all I had. Go eat something."}

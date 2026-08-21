@@ -1,0 +1,82 @@
+{#
+  One meeting's follow-through. The Meetings detail page links here from its
+  "Follow-through" card, so this is the seam between what was said and what
+  happened next — the same cards the board shows, narrowed to one meeting and
+  left in FIRE ORDER, because a page about a single meeting is a story and
+  stories run forwards.
+
+  Every macro comes from board.html: one card shape, one set of badges, one undo
+  affordance across the whole app.
+#}
+{% from "board.html" import action_card, pending_card, shell_tabbar with context %}
+<!doctype html>
+<html lang="en" data-view="meeting">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if meeting.meeting.title %}{{ meeting.meeting.title }} · Follow-through{% else %}Follow-through · Adjourn{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
+</head>
+<body data-view="meeting" data-undo-token="{{ undo_token }}">
+
+<header class="masthead" data-header>
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <h1 class="meeting-title">{{ meeting.meeting.title or meeting.meeting.meeting_id or 'Meeting' }}</h1>
+      <p class="meeting-meta">
+        {% if meeting.meeting.duration %}<span class="meta-item">{{ meeting.meeting.duration }}</span>{% endif %}
+        <span class="meta-item totals">{{ meeting.totals_line }}</span>
+        {% if meeting.meeting.meeting_id %}<span class="meta-item mode-note">{{ meeting.meeting.meeting_id }}</span>{% endif %}
+      </p>
+    </div>
+    <p class="tagline">What this meeting caused.</p>
+  </div>
+</header>
+
+{{ shell_tabbar('meeting') }}
+
+<main class="board">
+  <nav class="crosslinks" aria-label="This meeting elsewhere">
+    {% if meeting.transcript_url %}
+    <a class="link" href="{{ meeting.transcript_url }}">Transcript</a>
+    {% endif %}
+    {% if meeting.recap_url %}
+    <a class="link" href="{{ meeting.recap_url }}" target="_blank" rel="noopener">Recap page</a>
+    {% endif %}
+    <a class="link" href="/">All meetings' actions</a>
+  </nav>
+
+  {% if meeting.pending %}
+  <section class="column column-pending" aria-label="Actions inside their regret window">
+    <h2 class="column-title">In flight <span class="column-count">{{ meeting.pending | length }}</span></h2>
+    {% for item in meeting.pending %}{{ pending_card(item) }}{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if meeting.cards %}
+  <section class="column column-done" aria-label="Actions Adjourn executed for this meeting">
+    <h2 class="column-title">Executed <span class="column-count">{{ meeting.cards | length }}</span></h2>
+    {% for card in meeting.cards %}{{ action_card(card) }}{% endfor %}
+  </section>
+  {% else %}
+  <section class="empty-state" aria-label="No actions for this meeting">
+    <span class="empty-pulse" aria-hidden="true"></span>
+    <p class="empty-line">
+      Nothing followed from this meeting. That is a result, not a gap — most talk
+      should produce nothing at all.
+    </p>
+  </section>
+  {% endif %}
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<footer class="footfall">
+  <span>Adjourn</span>
+  <span class="dot-sep">·</span>
+  <span>read at {{ meeting.generated_at }}</span>
+</footer>
+
+<script src="{{ url_for('static', filename='board.js') }}" defer></script>
+</body>
+</html>

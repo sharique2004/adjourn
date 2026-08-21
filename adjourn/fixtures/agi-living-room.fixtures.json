@@ -1,0 +1,135 @@
+{
+  "_comment": "Ground truth for agi-living-room.jsonl, hand-written. This is THE demo meeting: eleven statements covering all ten statement kinds, and between them every one of the eight action kinds. Loaded verbatim by extraction.load_fixture_statements('agi-living-room') when no engine is available — the floor under the demo. Also the scoring target for tests/test_understanding_extraction.py.",
+  "meeting": {
+    "meeting_id": "agi-living-room",
+    "title": "MMM Standup — living room",
+    "date": "2026-08-21"
+  },
+  "statements": [
+    {
+      "segment_id": "agi-s05",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "Drop Redis on issue #2 and use an in-process LRU instead, because the profiled hot set is only sixty megabytes.",
+      "kind": "decision",
+      "entity_refs": {"issue_number": 2},
+      "quote": "Bad news is Redis is overkill. I profiled the ingestion path last night and the hot set is sixty megabytes. So we're dropping Redis on issue two and going with an in-process LRU instead.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s09",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "Priya takes the cache layer work over from Sam, since she found the sixty-megabyte hot set.",
+      "kind": "assignment",
+      "entity_refs": {"person": "Priya"},
+      "quote": "Priya's taking the cache work off Sam. She's the one who found the sixty megabytes, so she should finish it.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s11",
+      "speaker": "Them",
+      "topic": "cache layer",
+      "claim": "The cache layer ship date moves from the twenty-second to the twenty-fifth to give Priya the weekend.",
+      "kind": "deadline",
+      "entity_refs": {"deadline_text": "the twenty-fifth"},
+      "quote": "Push it to the twenty-fifth. She needs the weekend to rip the Redis client out.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s13",
+      "speaker": "Them",
+      "topic": "webhook signature verification",
+      "_comment": "Deliberately NOT 'retry logic': SHA-7 on the seeded Linear board is already 'Retry logic for executor failures'. A ticket_request that duplicates a ticket the board already has is the one thing this beat must not demonstrate.",
+      "claim": "File a ticket for webhook signature verification on the ingestion endpoint, which has never been tracked anywhere.",
+      "kind": "ticket_request",
+      "entity_refs": {},
+      "quote": "No. We keep talking about it and it lives nowhere. We need a ticket for webhook signature verification on the ingestion endpoint.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s15",
+      "speaker": "Them",
+      "topic": "streaming adapter",
+      "claim": "SHA-5 is about eighty percent done and should be in review tomorrow.",
+      "kind": "progress_report",
+      "_comment": "SHA-5 is a REAL ticket on the seeded Linear board ('Migrate transcript ingestion to the streaming adapter', In Progress) — this is the beat that moves it to In Review on stage. deadline_text 'tomorrow' is captured even though this is not a 'deadline' statement: the words are spoken in this segment and point forward. Enrichment like this is harmless because the planner's table, not the entity_refs, decides which kinds become calendar holds.",
+      "entity_refs": {"linear_identifier": "SHA-5", "percent": 80, "deadline_text": "tomorrow"},
+      "quote": "Speaking of — SHA-5, the streaming adapter. I'm about eighty percent done with it, should be in review tomorrow.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s17",
+      "speaker": "Them",
+      "topic": "config loader",
+      "_comment": "Named 'config loader' rather than 'storage adapter' so it cannot be confused — on stage or by the extractor's topic normalization — with SHA-5, the STREAMING adapter two beats earlier.",
+      "claim": "Open a pull request for the config loader tonight to get review on the interface before going further.",
+      "kind": "pr_intent",
+      "entity_refs": {"deadline_text": "tonight"},
+      "quote": "And I'll open a PR for the config loader tonight. It's draft-ready, I just want eyes on the interface before I go further.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s21",
+      "speaker": "Them",
+      "topic": "auth migration",
+      "claim": "The auth migration has run clean in dev all week with nothing to report.",
+      "kind": "update",
+      "_comment": "entity_refs is deliberately EMPTY. 'issue one' is spoken in agi-s20 (the question), not in agi-s21, and rule 8 forbids carrying a handle across segments — an inferred issue number is how a comment lands on the wrong issue. The planner resolves this one through memory.find_issue_for_topic('auth migration') -> 1 instead.",
+      "entity_refs": {},
+      "quote": "It's been running clean in dev all week. Nothing to report, which is the report.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s22",
+      "speaker": "You",
+      "topic": "streaming adapter",
+      "claim": "Is the rate-limit ticket still needed, or does SHA-5 already cover the same work?",
+      "kind": "question",
+      "entity_refs": {"linear_identifier": "SHA-5"},
+      "quote": "Do we still need the rate-limit ticket open, or is SHA-5 the same piece of work?",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s24",
+      "speaker": "You",
+      "topic": "meeting summary",
+      "claim": "Slack the channel the meeting summary once the standup is over.",
+      "kind": "message_commitment",
+      "entity_refs": {},
+      "quote": "Alright. I'll Slack the channel the summary once we're done here.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s25",
+      "speaker": "Them",
+      "topic": "demo deck",
+      "claim": "Email Div the demo deck after the standup; he has asked for it twice.",
+      "kind": "email_commitment",
+      "entity_refs": {"person": "Div"},
+      "quote": "And I'll email Div the deck after this. He's asked for it twice now and I keep forgetting.",
+      "source": "final",
+      "engine": "fixtures"
+    },
+    {
+      "segment_id": "agi-s26",
+      "speaker": "You",
+      "topic": "cache layer",
+      "claim": "Both of us review the cache layer on Friday to see where it landed.",
+      "kind": "deadline",
+      "entity_refs": {"deadline_text": "Friday"},
+      "quote": "Perfect. Let's review Friday, both of us, and see where the cache actually landed.",
+      "source": "final",
+      "engine": "fixtures"
+    }
+  ]
+}

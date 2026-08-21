@@ -1,0 +1,237 @@
+{#
+  The Connections tab — read-only, and the answer to the question a technical
+  founder asks thirty seconds after the board lands: "so which of that was real?"
+
+  Every row is a boolean or a sentence, never a value. The secrets table reports
+  PRESENCE only; there is no route on this server that can be made to print a
+  secret, and this page is the reason that has to stay true.
+#}
+{% from "board.html" import shell_tabbar with context %}
+<!doctype html>
+<html lang="en" data-view="connections">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connections · Adjourn</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
+</head>
+<body data-view="connections" data-undo-token="{{ undo_token }}">
+
+<header class="masthead" data-header>
+  <div class="masthead-inner">
+    <div class="masthead-left">
+      <h1 class="meeting-title">Connections</h1>
+      <p class="meeting-meta">
+        <span class="meta-item totals">{{ connections.mode.headline }}</span>
+        <span class="meta-item">regret window {{ connections.mode.regret_window_seconds }}s</span>
+        <span class="meta-item mode-note">read-only · nothing on this page writes anywhere</span>
+      </p>
+    </div>
+    <p class="tagline">Every badge on the board comes from this table.</p>
+  </div>
+</header>
+
+{{ shell_tabbar('connections') }}
+
+<main class="board">
+
+  <section class="column">
+    <h2 class="column-title">Executors <span class="column-count">{{ connections.executors | length }}</span></h2>
+    {% for row in connections.executors %}
+    <article class="card" data-kind="{{ row.kind }}" data-state="{{ 'ok' if row.registered else 'failed' }}">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <header class="card-top">
+          <span class="chip">{{ row.label }}</span>
+          {% if row.mode == 'live' %}
+            <span class="badge badge-live"><span class="dot"></span>LIVE</span>
+          {% else %}
+            <span class="badge badge-sim">SIM</span>
+          {% endif %}
+          {% if not row.registered %}<span class="badge badge-failed">UNREGISTERED</span>{% endif %}
+          <span class="spacer"></span>
+          <span class="stamp">{{ row.kind }}</span>
+        </header>
+        <h2 class="headline">{{ row.why }}</h2>
+        <footer class="card-bottom">
+          {% if row.requires %}
+            <span class="external-id">needs {{ row.requires | join(' · ') }}</span>
+          {% elif row.uses_gh_cli %}
+            <span class="external-id">auth via the gh CLI</span>
+          {% else %}
+            <span class="external-id">writes locally · no secret</span>
+          {% endif %}
+          <span class="spacer"></span>
+          {% if row.missing %}<span class="undo-note">missing: {{ row.missing | join(', ') }}</span>{% endif %}
+        </footer>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="column">
+    <h2 class="column-title">Backends</h2>
+
+    <article class="card" data-kind="recap_page" data-state="{{ 'ok' if connections.engine.reachable else 'failed' }}">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <header class="card-top">
+          <span class="chip">Engine</span>
+          {% if connections.engine.reachable %}
+            <span class="badge badge-live"><span class="dot"></span>REACHABLE</span>
+          {% else %}
+            <span class="badge badge-failed">NO ANSWER</span>
+          {% endif %}
+          <span class="spacer"></span>
+          <span class="stamp">MeetingScribe</span>
+        </header>
+        <h2 class="headline">{{ connections.engine.detail }}</h2>
+        <footer class="card-bottom">
+          <span class="external-id">{{ connections.engine.base_url }}</span>
+        </footer>
+      </div>
+    </article>
+
+    <article class="card" data-kind="linear_create" data-state="{{ 'ok' if connections.memory.available else 'failed' }}">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <header class="card-top">
+          <span class="chip">Memory</span>
+          {% if connections.memory.available %}
+            <span class="badge badge-live"><span class="dot"></span>OPEN</span>
+          {% else %}
+            <span class="badge badge-sim">UNAVAILABLE</span>
+          {% endif %}
+          <span class="spacer"></span>
+          <span class="stamp">{{ connections.memory.backend }}</span>
+        </header>
+        {# Only the COUNTS. memory.stats() also carries strings ("backend",
+           "database"), and "actions 0 · backend falkor · commitments 1" reads
+           like a broken number rather than a label. #}
+        <h2 class="headline">
+          {%- if connections.memory.available -%}
+            {% set counts = [] %}
+            {% for name, count in (connections.memory.stats or {}) | dictsort %}
+              {% if count is number %}{% set _ = counts.append(name ~ ' ' ~ count) %}{% endif %}
+            {% endfor %}
+            {{ counts | join(' · ') or 'open, no counts reported' }}
+          {%- else -%}
+            {{ connections.memory.note or 'not open' }}
+          {%- endif -%}
+        </h2>
+        <footer class="card-bottom">
+          <span class="external-id">graph {{ connections.targets.graph }}</span>
+        </footer>
+      </div>
+    </article>
+
+    <article class="card" data-kind="slack_send" data-state="{{ 'ok' if connections.cloud.state == 'reachable' else 'failed' }}">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <header class="card-top">
+          <span class="chip">Cloud mirror</span>
+          {% if connections.cloud.state == 'reachable' %}
+            <span class="badge badge-live"><span class="dot"></span>REACHABLE</span>
+          {% elif connections.cloud.state == 'unconfigured' %}
+            <span class="badge badge-sim">UNCONFIGURED</span>
+          {% elif connections.cloud.state == 'unprobed' %}
+            <span class="badge badge-holding">PROBING</span>
+          {% else %}
+            <span class="badge badge-failed">UNREACHABLE</span>
+          {% endif %}
+          <span class="spacer"></span>
+          <span class="stamp">FalkorDB Cloud</span>
+        </header>
+        <h2 class="headline">{{ connections.cloud.message }}</h2>
+        <footer class="card-bottom">
+          {% if connections.cloud.configured %}
+          <span class="external-id">
+            {{ connections.cloud.host }}:{{ connections.cloud.port }} ·
+            {{ 'TLS' if connections.cloud.tls else 'plaintext' }} ·
+            backlog {{ connections.cloud.backlog_lines }}
+          </span>
+          {% endif %}
+        </footer>
+      </div>
+    </article>
+  </section>
+
+  <section class="column">
+    <h2 class="column-title">Secrets <span class="column-count">presence only</span></h2>
+    <article class="card" data-kind="email_send" data-state="ok">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <ol class="commitments">
+          {% for name, present in connections.secrets | dictsort %}
+          <li class="commitment" data-state="{{ 'ok' if present else 'undone' }}">
+            <span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body">
+              <p class="commitment-summary">{{ name }}</p>
+              <p class="commitment-meta">
+                {% if present %}
+                  <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
+                {% else %}
+                  <span class="badge badge-sim">ABSENT</span>
+                {% endif %}
+              </p>
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+        <p class="source-note">
+          Booleans, not values. Adjourn reads secrets through one accessor and no
+          surface — this page, the board, the journal, the recap, the cloud
+          mirror — is allowed to render one.
+        </p>
+      </div>
+    </article>
+  </section>
+
+  <section class="column">
+    <h2 class="column-title">Targets</h2>
+    <article class="card" data-kind="github_update" data-state="ok">
+      <div class="card-rail" aria-hidden="true"></div>
+      <div class="card-body">
+        <ol class="commitments">
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">GitHub repo</p>
+              <p class="commitment-meta"><span class="external-id">{{ connections.targets.github_repo }}</span>
+                <span class="elapsed">allowlist: {{ connections.targets.github_allowlist | join(', ') }}</span></p></div></li>
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">Linear team</p>
+              <p class="commitment-meta"><span class="external-id">{{ connections.targets.linear_team }}</span></p></div></li>
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">gh CLI on PATH</p>
+              <p class="commitment-meta">
+                {% if connections.gh_cli_present %}
+                  <span class="badge badge-live"><span class="dot"></span>PRESENT</span>
+                {% else %}
+                  <span class="badge badge-failed">ABSENT</span>
+                {% endif %}
+              </p></div></li>
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">Journal</p>
+              <p class="commitment-meta"><span class="external-id">{{ connections.targets.journal }}</span></p></div></li>
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">Recaps</p>
+              <p class="commitment-meta"><span class="external-id">{{ connections.targets.recaps }}</span></p></div></li>
+          <li class="commitment"><span class="commitment-rail" aria-hidden="true"></span>
+            <div class="commitment-body"><p class="commitment-summary">Board bind</p>
+              <p class="commitment-meta"><span class="external-id">{{ connections.targets.board_bind }}</span>
+                <span class="elapsed">loopback only · undo needs this run's token</span></p></div></li>
+        </ol>
+      </div>
+    </article>
+  </section>
+
+</main>
+
+<footer class="footfall">
+  <span>Adjourn</span>
+  <span class="dot-sep">·</span>
+  <span>read at {{ connections.generated_at }}</span>
+</footer>
+
+<script src="{{ url_for('static', filename='board.js') }}" defer></script>
+</body>
+</html>
