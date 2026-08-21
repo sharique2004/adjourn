@@ -50,6 +50,14 @@ export default async function LandingPage() {
             <Link className="btn btn-quiet" href="/ledger">
               Commitment ledger
             </Link>
+            <a
+              className="btn btn-join"
+              href="https://github.com/sharique2004/adjourn"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Join the beta
+            </a>
           </div>
         </section>
 
