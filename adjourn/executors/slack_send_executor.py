@@ -8,10 +8,9 @@ Payload shape:
       "human_preview": "Slack #eng: heads up, cache layer is moving to Redis"
     }
 
-REGRET WINDOW: 60s. The planner sets regret_window_s, regret_window.py holds this
-in state/pending.json, and the board draws a countdown ring with a cancel button.
-By the time execute() is called the human has already had their chance — this
-module never asks a question, it sends.
+REGRET WINDOW: 60s only if a caller still sets one. Production Slack waits in
+Ready to send on the board — the human edits, then presses Send. This module
+never asks a question; by the time execute() is called the send is decided.
 
 Live transport: POST https://slack.com/api/chat.postMessage
     Authorization: Bearer xoxb-...      (Slack DOES use "Bearer " — unlike Linear)

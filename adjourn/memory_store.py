@@ -15,7 +15,7 @@ did not:
     (Statement)-[:PROMISED]->(Commitment)        # a promise someone made out loud
     (Action)-[:TOUCHED]->(Ticket {system:...})   # the linear/github object it moved
 
-WHY (:Commitment) IS ITS OWN NODE: a promise ("I'll email Div the deck") is not
+WHY (:Commitment) IS ITS OWN NODE: a promise ("I'll email Alex the deck") is not
 the same thing as the action that discharges it. The action can fail, be undone,
 or be cancelled inside the regret window, and the promise still stands. Keeping
 them separate is what lets a later meeting say "you said this last week too" even

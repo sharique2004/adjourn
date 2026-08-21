@@ -18,6 +18,20 @@ from pathlib import Path
 SANDBOX = Path(tempfile.mkdtemp(prefix="adjourn-stage2-"))
 (SANDBOX / "state").mkdir()
 (SANDBOX / "recaps").mkdir()
+
+# Snapshot the shipped recaps BEFORE adjourn is imported, so the final-state
+# contract can say "this suite added nothing" rather than "the operator has
+# never held a meeting". A live Stop writes <id>.html here; requiring the
+# directory to hold only README made `run_all` fail after every real recording.
+_SHIPPED_RECAPS = Path(__file__).resolve().parents[1] / "recaps"
+_SHIPPED_RECAP_ACTIONS = Path(__file__).resolve().parents[1] / "state" / "recap_actions"
+_RECAPS_BEFORE = frozenset(
+    path.name for path in _SHIPPED_RECAPS.iterdir()
+) if _SHIPPED_RECAPS.is_dir() else frozenset()
+_ACTIONS_BEFORE = frozenset(
+    path.name for path in _SHIPPED_RECAP_ACTIONS.iterdir()
+) if _SHIPPED_RECAP_ACTIONS.is_dir() else frozenset()
+
 os.environ.update({
     "ADJOURN_SIM": "1",
     "ADJOURN_STATE_DIR": str(SANDBOX / "state"),
@@ -367,18 +381,20 @@ check("the line rule 3b(d) was written for is still in the transcript",
 
 print("\n== nothing was written outside the sandbox ==")
 
-check("adjourn/recaps holds only its README",
-      sorted(p.name for p in config.RECAPS_DIR.iterdir()) == ["README.md"],
-      str(sorted(p.name for p in config.RECAPS_DIR.iterdir())))
+check("this suite added no recap files to the shipped tree",
+      frozenset(path.name for path in config.RECAPS_DIR.iterdir()) == _RECAPS_BEFORE
+      if config.RECAPS_DIR.is_dir() else not _RECAPS_BEFORE,
+      str(sorted(path.name for path in config.RECAPS_DIR.iterdir()) if config.RECAPS_DIR.is_dir() else []))
 _parked_dir = config.STATE_DIR / "recap_actions"
-check("adjourn/state/recap_actions is empty",
-      not _parked_dir.exists() or not any(_parked_dir.iterdir()),
-      str(list(_parked_dir.iterdir()) if _parked_dir.exists() else []))
+_actions_after = frozenset(path.name for path in _parked_dir.iterdir()) if _parked_dir.exists() else frozenset()
+check("this suite added no parked recap actions to the shipped tree",
+      _actions_after == _ACTIONS_BEFORE, str(sorted(_actions_after - _ACTIONS_BEFORE)))
 check("the real executions journal was never touched by this suite",
       not config.EXECUTIONS_JOURNAL_PATH.exists()
       or MEETING not in config.EXECUTIONS_JOURNAL_PATH.read_text(encoding="utf-8"))
-check("no cloud-mirror backlog was left in adjourn/state",
-      not (config.STATE_DIR / "mirror_backlog.jsonl").exists())
+_backlog = config.STATE_DIR / "mirror_backlog.jsonl"
+check("this suite left no probe rows in the cloud-mirror backlog",
+      not _backlog.exists() or MEETING not in _backlog.read_text(encoding="utf-8"))
 
 shutil.rmtree(SANDBOX, ignore_errors=True)
 check("the sandbox is cleaned up after itself", not SANDBOX.exists())

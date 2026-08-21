@@ -3,7 +3,7 @@
  * Three jobs, nothing more:
  *   1. poll /api/fragment once a second and swap in server-rendered HTML,
  *   2. animate the countdown rings locally from each card's fire_at,
- *   3. send an undo and say honestly what came back.
+ *   3. send, cancel, or undo and say honestly what came back.
  *
  * There is deliberately no card markup in this file. The server renders the
  * cards from the same Jinja macros that rendered the page, so what you curl and
@@ -182,10 +182,48 @@
 
   /* --- polling ------------------------------------------------------------ */
 
+  function snapshotDrafts() {
+    var drafts = {};
+    var cards = document.querySelectorAll(".card-compose[data-key]");
+    for (var index = 0; index < cards.length; index += 1) {
+      var card = cards[index];
+      var body = card.querySelector(".compose-body");
+      var subject = card.querySelector(".compose-subject");
+      drafts[card.dataset.key] = {
+        text: body ? body.value : "",
+        subject: subject ? subject.value : ""
+      };
+    }
+    return drafts;
+  }
+
+  function restoreDrafts(drafts) {
+    if (!drafts) {
+      return;
+    }
+    var cards = document.querySelectorAll(".card-compose[data-key]");
+    for (var index = 0; index < cards.length; index += 1) {
+      var card = cards[index];
+      var saved = drafts[card.dataset.key];
+      if (!saved) {
+        continue;
+      }
+      var body = card.querySelector(".compose-body");
+      var subject = card.querySelector(".compose-subject");
+      if (body && typeof saved.text === "string") {
+        body.value = saved.text;
+      }
+      if (subject && typeof saved.subject === "string") {
+        subject.value = saved.subject;
+      }
+    }
+  }
+
   function applyFragment(fragment) {
     if (!fragment || fragment.unchanged) {
       return;
     }
+    var drafts = snapshotDrafts();
     if (headerHost && fragment.header_html) {
       headerHost.innerHTML = fragment.header_html;
     }
@@ -195,6 +233,7 @@
     if (cardsHost) {
       cardsHost.innerHTML = fragment.cards_html || "";
     }
+    restoreDrafts(drafts);
     if (gutsHost && Object.prototype.hasOwnProperty.call(fragment, "guts_html")) {
       gutsHost.innerHTML = fragment.guts_html || "";
       rememberFeedRows(true);
@@ -275,7 +314,56 @@
       });
   }
 
+  function sendNow(cardId, button) {
+    var card = button.closest ? button.closest(".card-compose") : null;
+    var body = card ? card.querySelector(".compose-body") : null;
+    var subject = card ? card.querySelector(".compose-subject") : null;
+    button.disabled = true;
+    button.textContent = "…";
+    var headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    };
+    if (undoToken) {
+      headers["X-Adjourn-Undo-Token"] = undoToken;
+    }
+    fetch("/send/" + encodeURIComponent(cardId), {
+      method: "POST",
+      headers: headers,
+      cache: "no-store",
+      body: JSON.stringify({
+        text: body ? body.value : "",
+        subject: subject ? subject.value : ""
+      })
+    })
+      .then(function (response) {
+        return response.json().catch(function () {
+          return { ok: false, message: "the board could not read the response" };
+        });
+      })
+      .then(function (outcome) {
+        showToast(outcome.message || (outcome.ok ? "sent" : "refused"), outcome.ok ? "good" : "bad");
+        currentVersion = "";
+        if (!pollsForFragments) {
+          window.setTimeout(function () { window.location.reload(); }, 900);
+          return Promise.resolve();
+        }
+        return pollOnce();
+      })
+      .catch(function () {
+        showToast("send could not reach the board", "bad");
+        button.disabled = false;
+        button.textContent = button.dataset.sendLabel || "Send";
+      });
+  }
+
   document.addEventListener("click", function (event) {
+    var sendButton = event.target.closest ? event.target.closest("[data-send]") : null;
+    if (sendButton) {
+      event.preventDefault();
+      sendNow(sendButton.dataset.send, sendButton);
+      return;
+    }
     var button = event.target.closest ? event.target.closest("[data-undo]") : null;
     if (!button) {
       return;

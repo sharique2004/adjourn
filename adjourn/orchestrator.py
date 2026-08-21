@@ -19,17 +19,19 @@ TWO PHASES, deliberately:
 Dedup is by planner.build_dedup_key() — never by segment_id, because the live
 pass and the final pass number their segments differently.
 
-REGRET WINDOW: actions with regret_window_s > 0 are not sent immediately. They
-are written to state/pending.json with a `fire_at` timestamp, the board draws a
-countdown ring, and a human can cancel. This module owns that file; the board
-only reads it (and POSTs cancellations back here).
+HOLD FOR SEND: slack_send and email_send set hold_for_send and wait in
+state/pending.json until the board POSTs a send (after an optional edit) or a
+cancel. They never auto-fire — once they leave the machine they cannot come back.
+
+REGRET WINDOW: any other action with regret_window_s > 0 still gets a countdown
+ring. This module owns pending.json; the board reads it and POSTs send/cancel.
 
 Run:
     python -m adjourn.orchestrator --watch
     python -m adjourn.orchestrator --replay
         # canned fixture through the real extract → plan → execute path;
         # MeetingScribe is not required. Pass a fixture name, .jsonl, or
-        # meeting id to override; with no target this is agi-living-room.
+        # meeting id to override; with no target this is living-room-standup.
 """
 
 from __future__ import annotations
@@ -51,6 +53,9 @@ from .planner import Action
 PENDING_STATUS_WAITING = "waiting"
 PENDING_STATUS_CANCELLED = "cancelled"
 PENDING_STATUS_FIRED = "fired"
+# Holds have no deadline. seconds_remaining uses this so a sort never treats
+# them as due, and int() in the board view never overflows.
+HOLD_REMAINING_SENTINEL = 10 ** 9
 
 # The recap is a PAGE, not an event. Re-running it on the reconcile pass is the
 # whole point: it rewrites in place with the better final-transcript quotes.
@@ -61,7 +66,7 @@ ALWAYS_REFIRE_KINDS: frozenset[str] = frozenset({"recap_page"})
 # other executors just did; everything else keeps planner order.
 LAST_ACTION_KINDS: tuple[str, ...] = ("recap_page",)
 
-DEFAULT_REPLAY_TARGET = "agi-living-room"
+DEFAULT_REPLAY_TARGET = "living-room-standup"
 
 WATCHER_WAITING = "waiting"
 WATCHER_MEETING_STOPPED = "meeting_stopped"
@@ -469,7 +474,7 @@ def extraction_status_running(source: str) -> ExtractionStatus:
 def count_silent_segments(statements: list, segment_count: int) -> int:
     """Lines of the transcript that produced no statement at all.
 
-    A statement's segment_id may be suffixed ("agi-s24.2") when the extractor
+    A statement's segment_id may be suffixed ("lr-s24.2") when the extractor
     split one sentence into two claims, so the LINE is the part before the dot —
     two claims off one sentence silence one line, not minus one.
     """
@@ -628,12 +633,14 @@ def watcher_status_transcript_ready(meeting_id: str, *, replay: bool = False) ->
 
 @dataclass
 class PendingAction:
-    """An action inside its regret window, waiting out a visible countdown.
+    """An action waiting to leave the machine — countdown or Ready to send.
 
     dedup_key       — same key the journal will carry, so the board can match the
-                      countdown card to the fired card.
-    fire_at         — ISO timestamp when this goes out unless cancelled.
+                      pending card to the fired card.
+    fire_at         — ISO timestamp when a countdown goes out unless cancelled.
+                      Empty when hold_for_send is True (no deadline).
     human_preview   — one line of what is about to be sent, shown on the card.
+    hold_for_send   — True parks this until a human presses Send. Never auto-fires.
     status          — "waiting" | "cancelled" | "fired".
     """
 
@@ -642,6 +649,7 @@ class PendingAction:
     fire_at: str
     created_at: str = field(default_factory=results.utc_timestamp)
     regret_window_s: int = 0
+    hold_for_send: bool = False
     human_preview: str = ""
     quote: str = ""
     speaker: str = ""
@@ -654,7 +662,13 @@ class PendingAction:
         return self.status == PENDING_STATUS_WAITING
 
     def seconds_remaining(self, now: datetime | None = None) -> float:
-        """Seconds until fire_at, floored at 0. Drives the board's countdown ring."""
+        """Seconds until fire_at, floored at 0. Drives the board's countdown ring.
+
+        Holds have no deadline; they return a sentinel so a sort never treats
+        them as due.
+        """
+        if self.hold_for_send:
+            return float(HOLD_REMAINING_SENTINEL)
         now = now or datetime.now(UTC)
         try:
             deadline = datetime.fromisoformat(self.fire_at)
@@ -671,6 +685,7 @@ class PendingAction:
             "fire_at": self.fire_at,
             "created_at": self.created_at,
             "regret_window_s": self.regret_window_s,
+            "hold_for_send": self.hold_for_send,
             "human_preview": self.human_preview,
             "quote": self.quote,
             "speaker": self.speaker,
@@ -687,6 +702,7 @@ class PendingAction:
             fire_at=data.get("fire_at", ""),
             created_at=data.get("created_at", ""),
             regret_window_s=int(data.get("regret_window_s", 0)),
+            hold_for_send=bool(data.get("hold_for_send")),
             human_preview=data.get("human_preview", ""),
             quote=data.get("quote", ""),
             speaker=data.get("speaker", ""),
@@ -697,14 +713,21 @@ class PendingAction:
 
     @classmethod
     def from_action(cls, action: Action, now: datetime | None = None) -> PendingAction:
-        """Build a countdown entry from a planned action."""
+        """Build a pending entry from a planned action."""
         now = now or datetime.now(UTC)
-        fire_at = now + timedelta(seconds=action.regret_window_s)
+        hold = bool(getattr(action, "hold_for_send", False))
+        if hold:
+            fire_at = ""
+        else:
+            fire_at = (now + timedelta(seconds=action.regret_window_s)).isoformat(
+                timespec="seconds"
+            )
         return cls(
             dedup_key=action.dedup_key,
             kind=action.kind,
-            fire_at=fire_at.isoformat(timespec="seconds"),
+            fire_at=fire_at,
             regret_window_s=action.regret_window_s,
+            hold_for_send=hold,
             human_preview=str(action.payload.get("human_preview", "")),
             quote=action.quote,
             speaker=action.speaker,
@@ -859,13 +882,95 @@ def due_pending_actions(
     now: datetime | None = None,
     path: Path | None = None,
 ) -> list[PendingAction]:
-    """Waiting entries whose countdown has expired — the ones to fire on this tick."""
+    """Waiting entries whose countdown has expired — the ones to fire on this tick.
+
+    Holds are never due. They wait for send_held_action(), not the timer.
+    """
     now = now or datetime.now(UTC)
     return [
         item
         for item in read_pending_actions(path)
-        if item.is_waiting and item.seconds_remaining(now) <= 0
+        if item.is_waiting
+        and not item.hold_for_send
+        and item.seconds_remaining(now) <= 0
     ]
+
+
+def _apply_send_edits(entry: PendingAction, edits: dict | None) -> None:
+    """Write the human's draft back onto the pending payload, in place."""
+    if not edits:
+        return
+    payload = dict(entry.payload or {})
+    text = edits.get("text")
+    subject = edits.get("subject")
+    if isinstance(text, str):
+        cleaned = text.strip()
+        if entry.kind == "email_send":
+            payload["body_text"] = cleaned
+        else:
+            payload["text"] = cleaned
+    if isinstance(subject, str) and entry.kind == "email_send":
+        payload["subject"] = subject.strip()
+    if entry.kind == "email_send":
+        person = str(payload.get("person") or "").strip()
+        body = str(payload.get("body_text") or payload.get("subject") or "").strip()
+        preview = body if len(body) <= 60 else body[:57].rsplit(" ", 1)[0] + "…"
+        payload["human_preview"] = f"Email {person or 'the room'}: {preview}" if preview else (
+            f"Email {person}" if person else "Email"
+        )
+    elif payload.get("text"):
+        body = " ".join(str(payload.get("text") or "").split())
+        clipped = body if len(body) <= 70 else body[:67].rsplit(" ", 1)[0] + "…"
+        payload["human_preview"] = f"Slack: {clipped}"
+    entry.payload = payload
+    entry.human_preview = str(payload.get("human_preview") or entry.human_preview)
+
+
+def send_held_action(
+    dedup_key: str,
+    *,
+    edits: dict | None = None,
+    path: Path | None = None,
+    memory=None,
+    meeting_title: str = "",
+) -> results.ExecutorResult | None:
+    """Fire a Ready-to-send draft after optional edits. None if nothing was waiting.
+
+    Claims the pending entry before the executor runs, so two Send clicks cannot
+    post twice. Countdown items are refused — they fire on the timer, not here.
+    """
+    key = (dedup_key or "").strip()
+    if not key:
+        return None
+    items = read_pending_actions(path)
+    target: PendingAction | None = None
+    for item in items:
+        if item.dedup_key == key and item.is_waiting:
+            target = item
+            break
+    if target is None or not target.hold_for_send:
+        return None
+    _apply_send_edits(target, edits)
+    header = read_pending_header(path)
+    write_pending_actions(items, path=path, **header)
+    if not mark_pending_action_fired(key, path):
+        return None
+    action = Action(
+        kind=target.kind,
+        payload=target.payload or {},
+        dedup_key=target.dedup_key,
+        regret_window_s=0,
+        hold_for_send=False,
+        quote=target.quote,
+        speaker=target.speaker,
+        meeting_id=target.meeting_id,
+        source="send",
+    )
+    title = meeting_title or str(header.get("meeting_title") or "")
+    result = fire_action(action, meeting_title=title, memory=memory, ignore_regret_window=True)
+    if result is not None:
+        refresh_recap_after_late_action(target.meeting_id, memory)
+    return result
 
 
 def clear_pending_actions(path: Path | None = None) -> None:
@@ -1380,10 +1485,9 @@ def fire_action(
 ) -> results.ExecutorResult | None:
     """Dispatch one action to its executor, journal the result, update memory.
 
-    Returns None when the action was QUEUED for its regret window rather than
-    fired. Nothing is journaled until something actually happens — the board
-    learns about countdowns from pending.json, and the journal stays a record of
-    events, not of intentions.
+    Returns None when the action was QUEUED rather than fired — either a
+    countdown, or a Slack/email draft waiting in Ready to send. Nothing is
+    journaled until something actually happens.
 
     Never raises: executors.execute_action() turns any explosion into a failed
     result, and a failed result is journaled too so the board can show it red.
@@ -1395,6 +1499,16 @@ def fire_action(
     # one.
     if meeting_title and not action.payload.get("meeting_title"):
         action.payload["meeting_title"] = meeting_title
+
+    if action.hold_for_send and not ignore_regret_window:
+        add_pending_action(action, meeting_title=meeting_title)
+        preview = action.payload.get("human_preview") or action.kind
+        print(f"[orchestrator] queued {action.kind} until you send — {action.dedup_key}")
+        report_pipeline_event(
+            stage="executor", tone="hold", label=action.kind,
+            text=f"ready to send · {preview}",
+        )
+        return None
 
     if action.regret_window_s > 0 and not ignore_regret_window:
         entry = add_pending_action(action, meeting_title=meeting_title)
@@ -1648,6 +1762,7 @@ def tick_pending_actions(memory=None) -> list[results.ExecutorResult]:
             payload=entry.payload,
             dedup_key=entry.dedup_key,
             regret_window_s=entry.regret_window_s,
+            hold_for_send=False,
             quote=entry.quote,
             speaker=entry.speaker,
             meeting_id=entry.meeting_id,
@@ -1756,8 +1871,10 @@ def reconcile_from_final_transcript(meeting_id: str, memory=None) -> list[result
             f"{len(segments)} final segment(s), speakers {meta.get('speakers')}"
         )
         if not segments:
-            print("[orchestrator] final transcript is empty — nothing to reconcile")
-            return []
+            print(
+                "[orchestrator] final transcript is empty — "
+                "recap only, so the board is not blank"
+            )
 
         report_pipeline(
             mode="watch" if read_pipeline_status().mode != "replay" else "replay",
@@ -1953,6 +2070,53 @@ def record_rewrites_itself(record: dict) -> bool:
 # --- the run loop -----------------------------------------------------------
 
 
+def handle_meeting_event(event: watcher.MeetingEvent, memory=None) -> None:
+    """One watcher edge -> the pass it belongs to. THE LIVE HANDOFF, in one place.
+
+    This is what "press Stop on the Live tab and Follow-through fills itself"
+    actually is, end to end:
+
+        Live tab Stop  ->  POST /api/record/stop (meetings_ui proxies it verbatim;
+                           the board never writes to the engine's recorder itself)
+        engine         ->  /api/record/status `recording` flips True -> False
+        watcher        ->  the 2 Hz fast poll sees that edge and FORCES an
+                           immediate /api/status poll instead of waiting out the
+                           1 Hz tick (detect_recording_stop_edge)
+        watcher        ->  a NEW key in `jobs` is the stop edge AND the meeting id
+                           in one observation  ->  EVENT_MEETING_STOPPED
+        here           ->  handle_meeting_stopped()  — the fast pass, so cards are
+                           on the board while the transcript is still being written
+        watcher        ->  jobs[<id>].state == "done"  ->  EVENT_TRANSCRIPT_READY
+        here           ->  reconcile_from_final_transcript() — the full pass
+
+    It used to be a closure inside run_orchestrator, which meant the one claim the
+    Live tab makes could not be asserted without starting the engine. It is a
+    module-level function now for exactly that reason: the suite drives it with
+    the phase functions stubbed and proves each edge reaches the right pass.
+
+    SUMMARY_READY is logged and nothing else. The auto-summary is a bonus that may
+    never arrive and nothing in Adjourn is allowed to wait on it.
+    """
+    if event.event == watcher.EVENT_MEETING_STOPPED:
+        report_pipeline(
+            mode="watch",
+            pass_name="fast",
+            meeting_id=event.meeting_id,
+            watcher=watcher_status_stopped(event.meeting_id),
+        )
+        handle_meeting_stopped(event.meeting_id, memory)
+    elif event.event == watcher.EVENT_TRANSCRIPT_READY:
+        report_pipeline(
+            mode="watch",
+            pass_name="final",
+            meeting_id=event.meeting_id,
+            watcher=watcher_status_transcript_ready(event.meeting_id),
+        )
+        reconcile_from_final_transcript(event.meeting_id, memory)
+    elif event.event == watcher.EVENT_SUMMARY_READY:
+        print(f"[orchestrator] summary ready for {event.meeting_id} (bonus, nothing waits on it)")
+
+
 def run_orchestrator(*, stop_after_seconds: float | None = None) -> None:
     """Start the watcher and drive both phases until interrupted.
 
@@ -1961,6 +2125,7 @@ def run_orchestrator(*, stop_after_seconds: float | None = None) -> None:
     broken action must not stop the rest of the meeting.
     """
     config.ensure_state_directories()
+    watcher._unbuffer_stdio()
     memory = open_memory_safely()
     # Before anything reads the engine: start it if it is not up. Bounded,
     # best-effort, and it writes state/engine_launch.json so the board can show
@@ -1989,24 +2154,7 @@ def run_orchestrator(*, stop_after_seconds: float | None = None) -> None:
     )
 
     def handle(event: watcher.MeetingEvent) -> None:
-        if event.event == watcher.EVENT_MEETING_STOPPED:
-            report_pipeline(
-                mode="watch",
-                pass_name="fast",
-                meeting_id=event.meeting_id,
-                watcher=watcher_status_stopped(event.meeting_id),
-            )
-            handle_meeting_stopped(event.meeting_id, memory)
-        elif event.event == watcher.EVENT_TRANSCRIPT_READY:
-            report_pipeline(
-                mode="watch",
-                pass_name="final",
-                meeting_id=event.meeting_id,
-                watcher=watcher_status_transcript_ready(event.meeting_id),
-            )
-            reconcile_from_final_transcript(event.meeting_id, memory)
-        elif event.event == watcher.EVENT_SUMMARY_READY:
-            print(f"[orchestrator] summary ready for {event.meeting_id} (bonus, nothing waits on it)")
+        handle_meeting_event(event, memory)
 
     def tick() -> None:
         tick_pending_actions(memory)
@@ -2058,7 +2206,7 @@ def replay_meeting(target: str, *, phase: str = "both") -> list[results.Executor
         return _replay_json_file(path)
     if path.is_file() and path.suffix == ".jsonl":
         return _replay_transcript_file(path)
-    # A bare fixture name ("agi-living-room") resolves to its transcript before it
+    # A bare fixture name ("living-room-standup") resolves to its transcript before it
     # is treated as a meeting id, so a rehearsal and the demo run the same code.
     fixture_transcript = config.FIXTURES_DIR / f"{Path(target).name}.jsonl"
     if fixture_transcript.is_file():

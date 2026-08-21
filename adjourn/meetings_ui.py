@@ -153,8 +153,11 @@ PRIVACY_LINE = (
 # The library then shows those ids and nothing else. Anything currently recording
 # or processing stays visible whatever the list says — that is the demo's own
 # meeting, and hiding the recording you just made is a worse failure than showing
-# one you did not mean to. The detail page refuses hidden ids too, so a guessed
-# URL cannot walk around the filter.
+# one you did not mean to. A meeting that flipped to "done" in the last hour
+# stays visible for the same reason: Stop used to make the row vanish the
+# instant transcription finished, which is how Meetings went blank on stage.
+# The detail page refuses hidden ids too, so a guessed URL cannot walk around
+# the filter.
 PRESENTATION_VISIBLE_STATUSES = frozenset({"recording", "processing"})
 
 #: WHAT THE PAGE SAYS vs WHAT THE OPERATOR IS TOLD. These used to be one string,
@@ -201,7 +204,16 @@ def presentation_allows(meta: dict) -> bool:
         return True
     if str(meta.get("id") or "") in presentation_meeting_ids():
         return True
-    return status_of(meta) in PRESENTATION_VISIBLE_STATUSES
+    if status_of(meta) in PRESENTATION_VISIBLE_STATUSES:
+        return True
+    # Just-finished: still the demo's own meeting, now with a transcript.
+    try:
+        from . import watcher
+
+        age = watcher.meeting_id_age_seconds(str(meta.get("id") or ""))
+    except Exception:  # noqa: BLE001 — a bad id is "not recent", not a 500
+        return False
+    return age is not None and age <= watcher.CATCH_UP_WINDOW_SECONDS
 
 
 # --- the engine client ------------------------------------------------------
@@ -853,7 +865,7 @@ def build_live_state(client: EngineClient) -> dict:
         "engine": describe_engine_launch(client, online),
         # THE TWO TRACK NAMES, resolved once on the server. The recorder labels
         # its own tracks "You" and "Them", which is right on its HUD and wrong
-        # on a projector — "Them will email Div the deck" is the sentence that
+        # on a projector — "Them will email Alex the deck" is the sentence that
         # settled it. Every other surface in Adjourn already renders these two
         # through the same map; the live captions were the last place that did
         # not, so a caption read one way and the ledger row it became read

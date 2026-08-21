@@ -14,7 +14,7 @@ Two halves:
 SCORING IS ISOLATED ON PURPOSE. The vocabulary fed to the extractor comes from a
 throwaway SQLite memory seeded with the PRIOR meeting only — never from the
 shared "adjourn" graph. During this build a parallel lane was found ingesting
-the agi-living-room ground truth into that graph, which meant known_topics()
+the living-room-standup ground truth into that graph, which meant known_topics()
 handed the extractor the exact topic answer key and the score came back a
 meaningless 100%. An evaluation that reads shared mutable state is not an
 evaluation.
@@ -36,7 +36,7 @@ from .. import extraction, memory_store, prompts
 PASSED = 0
 FAILED = 0
 
-DEMO_MEETING = "agi-living-room"
+DEMO_MEETING = "living-room-standup"
 PRIOR_MEETING = "prior-standup"
 
 
@@ -223,6 +223,11 @@ def test_engine_ladder() -> None:
               extraction.resolve_engine_order("claude")[0] == extraction.ENGINE_CLAUDE)
     check("no segments and no fixture engine returns empty, without a model call",
           extraction.extract_statements([], "Empty Meeting") == [])
+    check("whitespace-only segments also skip the model",
+          extraction.extract_statements(
+              [{"segment_id": "live-1", "text": "   "}, {"segment_id": "live-2", "text": ""}],
+              "Silent Meeting",
+          ) == [])
     fixture_run = extraction.extract_statements(
         [], "Demo", meeting_id=DEMO_MEETING, engine=extraction.ENGINE_FIXTURES)
     # TWELVE since the PR-review beat was merged into the demo meeting, so one
@@ -395,7 +400,7 @@ def run_live_scoring() -> None:
     memory.close()
 
     demo_truth = {s.segment_id: s for s in extraction.load_fixture_statements(DEMO_MEETING)}
-    reversal = demo_truth["agi-s05"]
+    reversal = demo_truth["lr-s05"]
     verdict = extraction.judge_conflict(history, {
         "date": "2026-08-21", "meeting": "MMM Standup — living room",
         "who": reversal.speaker, "kind": reversal.kind, "text": reversal.claim,
@@ -406,7 +411,7 @@ def run_live_scoring() -> None:
     check("the conflict says what changed", bool(verdict.what_changed))
     check("the conflict carries before and after", bool(verdict.before) and bool(verdict.after))
 
-    steady = demo_truth["agi-s21"]
+    steady = demo_truth["lr-s21"]
     steady_verdict = extraction.judge_conflict(memory_history_for_auth(), {
         "date": "2026-08-21", "meeting": "MMM Standup — living room",
         "who": steady.speaker, "kind": steady.kind, "text": steady.claim,

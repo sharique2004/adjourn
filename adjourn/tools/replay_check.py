@@ -108,8 +108,8 @@ SCENARIOS: tuple[Scenario, ...] = (
         expect_in_plan=("SHA-6",),
     ),
     Scenario(
-        name="agi-living-room",
-        path=fixture("agi-living-room"),
+        name="living-room-standup",
+        path=fixture("living-room-standup"),
         why="the demo meeting — every action kind the product has, from one bare --replay",
         # EXACT, and it is the only scenario that earns it. This is the meeting
         # the room watches: the PR-review beat was merged in from
@@ -125,7 +125,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             "pull_request_stub",    # the config-loader draft PR
             "calendar_hold",        # the 25th, and the Friday review
             "slack_send",           # the summary, behind its regret window
-            "email_send",           # the deck to Div, behind its regret window
+            "email_send",           # the deck to Alex, behind its regret window
             "pr_review_suggestion", # the join-button colour, inline on the prop PR
         ),
         exact_kinds=True,

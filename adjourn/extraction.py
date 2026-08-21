@@ -181,7 +181,7 @@ class Statement:
     should produce nothing, and the three ways a sentence LOOKS actionable
     without BEING actionable are: it is negated ("don't email the client yet"),
     it was rejected in the room ("we could file a ticket but let's not"), or it
-    is somebody else's commitment being relayed ("Div said he'd send the deck").
+    is somebody else's commitment being relayed ("Alex said he'd send the deck").
     A statement carrying any of them is recap-and-memory only — see the gate at
     the top of planner.plan().
     """
@@ -1211,7 +1211,7 @@ NEGATION_OBJECT_WINDOW = 40
 # Deliberately excludes "I said" and "we said": a person relaying their OWN
 # earlier words is still making the commitment.
 # NOT case-insensitive, deliberately: the capital is what tells a NAME from an
-# ordinary word, and re.IGNORECASE quietly threw that away — it read "Div ALSO
+# ordinary word, and re.IGNORECASE quietly threw that away — it read "Alex ALSO
 # said he'd..." and attributed the promise to a person called "Also".
 _ATTRIBUTION_PATTERN = re.compile(
     r"\b(?:(?P<name>[A-Z][a-z]+)|[Hh]e|[Ss]he|[Tt]hey)"
@@ -1294,7 +1294,7 @@ def detect_negation(text: str) -> str:
 
 
 def detect_reported_speech(text: str) -> tuple[bool, str]:
-    """(is_reported, subject) for "Div said he'd send the deck". Pure.
+    """(is_reported, subject) for "Alex said he'd send the deck". Pure.
 
     The subject is the attributed NAME when one was spoken, and "" when the
     speaker used a bare pronoun — an unresolved "he" is still reported speech,
@@ -1387,7 +1387,7 @@ MIC_TRACK_LABELS: frozenset[str] = frozenset({"you", "me", "mic", "self"})
 DEFAULT_SPEAKER_NAME = "Sharique"
 
 # "Them" has exactly the same problem in the other direction, and it reads worse
-# because it lands mid-sentence: an email card that says "Them will email Div the
+# because it lands mid-sentence: an email card that says "Them will email Alex the
 # deck" looks like a bug on a projector. The system track is everybody who is not
 # holding the microphone, so the honest rendering is a description rather than a
 # name — Adjourn genuinely does not know who spoke, and saying so is better than
@@ -1479,7 +1479,8 @@ def extract_statements(
 
     `meeting_id` is only used to find a fixture; extraction itself never needs it.
     """
-    if not segments and engine != ENGINE_FIXTURES:
+    has_words = any(str(segment.get("text") or "").strip() for segment in (segments or []))
+    if not has_words and engine != ENGINE_FIXTURES:
         return []
     for candidate in resolve_engine_order(engine):
         try:

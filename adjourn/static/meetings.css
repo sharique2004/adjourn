@@ -43,7 +43,7 @@
 
 .mpage {
   margin: 0 auto;
-  max-width: var(--page);
+  max-width: min(var(--page), 100%);
 }
 
 .crumb {

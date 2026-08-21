@@ -338,7 +338,10 @@ def linear_team_key() -> str:
 
 
 def regret_window_seconds() -> int:
-    """Visible countdown before irreversible sends (slack_send, email_send) fire."""
+    """Seconds of countdown when an action kind still uses a regret window.
+
+    Slack and email no longer use this — they wait in Ready to send.
+    """
     return read_integer_setting("REGRET_WINDOW_SECONDS", DEFAULT_REGRET_WINDOW_SECONDS)
 
 

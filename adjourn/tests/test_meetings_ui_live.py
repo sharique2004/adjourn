@@ -227,8 +227,25 @@ def test_a_closed_engine_leaves_start_pressable_because_pressing_it_starts_the_e
     """Start used to be disabled over a closed engine. It is the one button that
     should not be: the proxy launches the recorder in the background before it
     forwards, so pressing Start is what starts it. Stop stays disabled — there is
-    nothing to stop."""
-    html = client_for(MockEngine(status=(None, 0))).get("/meetings/live").get_data(as_text=True)
+    nothing to stop.
+
+    THE LAUNCH RECORD IS STUBBED, and it has to be. `read_engine_launch_state`
+    reads the SHIPPED tree's `adjourn/state/engine_launch.json` — a real file
+    that a `--watch` run or a rehearsal leaves behind, and whose contents change
+    the pill this page renders. Without the stub this test passed on a clean
+    machine and failed on one that had rehearsed, which is the worst kind of
+    red: it appears the morning of a demo and looks like a regression. The
+    subject here is a closed engine nobody has pressed Start on yet, so the
+    honest fixture for that file is an empty dict.
+    """
+    from adjourn import meetingscribe_source
+
+    original = meetingscribe_source.read_engine_launch_state
+    meetingscribe_source.read_engine_launch_state = lambda: {}
+    try:
+        html = client_for(MockEngine(status=(None, 0))).get("/meetings/live").get_data(as_text=True)
+    finally:
+        meetingscribe_source.read_engine_launch_state = original
     assert html.count("disabled>") == 1
     assert "data-stop\n              disabled>" in html or "data-stop" in html
     assert "not answering" in html
@@ -493,6 +510,9 @@ def test_presentation_mode_is_what_clears_the_librarys_foreign_archive(
     This is the assertion that pins the brief's "do not dump the entire history
     into the pitch library" line to something a test can fail on. The filter's
     ENABLEMENT is configuration, not this lane's; its BEHAVIOUR is here.
+
+    A meeting that finished in the last hour may still appear (Stop must not
+    vanish the row). That is not the foreign archive this test is pinning.
     """
     monkeypatch.setattr(meetings_ui, "presentation_mode_enabled", lambda: True)
     monkeypatch.setattr(meetings_ui, "presentation_meeting_ids", frozenset)
@@ -500,7 +520,7 @@ def test_presentation_mode_is_what_clears_the_librarys_foreign_archive(
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "meetingscribe" not in html.lower()
-    assert "No recordings yet." in html
+    assert "Salient Interview" not in html
 
 
 def test_live_renders_with_no_recorded_launch_attempt_at_all(dead_engine_client):

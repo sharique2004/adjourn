@@ -82,7 +82,7 @@ KIND_GUIDE: tuple[tuple[str, str], ...] = (
     ),
     (
         "email_commitment",
-        "someone promises to send an EMAIL. 'I'll email Div the deck'. Put the "
+        "someone promises to send an EMAIL. 'I'll email Alex the deck'. Put the "
         "recipient in entity_refs.person.",
     ),
     (
@@ -140,7 +140,7 @@ RULES
    (c) REPORTED SPEECH — SOMEBODY ELSE'S COMMITMENT, RELAYED. The person speaking is not the person promising, and nobody in the room owes anything.
        "She told me she'd take it. She said she'd file the ticket and loop in legal once she has the first draft."  -> NOTHING. This filed a real ticket in Priya's name.
        "That's what he said in standup. He said he'd push it before the freeze."  -> NOTHING. This opened a real branch and a real draft pull request.
-       "Div also said he'd email the client the new timeline."  -> NOTHING.
+       "Alex also said he'd email the client the new timeline."  -> NOTHING.
        If you emit one of these anyway, put the ORIGINAL committer in `speaker` — never the person relaying it — so the mismatch is visible downstream. "X said he'd", "she told me she'd", "that's what he said", "he mentioned he was going to" are the giveaways. A first-person promise ("I'll take it") and a promise ASSIGNED in the room ("Priya's taking the cache work off Sam") are both real and are NOT this.
 
    (d) SOMEBODY ELSE'S WORK, SIZED BY THE ROOM. An estimate of how quick, easy or cheap an absent person's task would be is not that person's commitment, and the date attached to it is not a deadline.

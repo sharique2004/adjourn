@@ -80,11 +80,11 @@ NEGATED_LINES: tuple[str, ...] = (
 )
 
 REPORTED_LINES: tuple[tuple[str, str], ...] = (
-    ("Div said he'd send the deck. He said end of day yesterday, so, you know, sometime this week.", "Div"),
+    ("Alex said he'd send the deck. He said end of day yesterday, so, you know, sometime this week.", "Alex"),
     ("He said he'd use the one from the offsite and fix the pricing slide himself.", ""),
     ("She told me she'd take it. She said she'd file the ticket and loop in legal once she has the first draft.", ""),  # FP3
     ("That's what he said in standup. He said he'd push it before the freeze.", ""),  # FP4
-    ("Technically. Div also said he'd email the client the new timeline, which I'll believe when I see it.", "Div"),
+    ("Technically. Alex also said he'd email the client the new timeline, which I'll believe when I see it.", "Alex"),
     ("And Maya said she'd move the onboarding card to in progress once the copy is signed off.", "Maya"),
     ("And Rob mentioned he was going to open a PR for the SSO change, right?", "Rob"),
 )
@@ -103,7 +103,7 @@ MUST_STILL_FIRE: tuple[str, ...] = (
     "Yeah, I'll slack the team the notes so everyone knows the Redis thing changed. Don't want someone "
     "building against the old decision.",
     "Priya's taking the cache work off Sam. She's the one who found the sixty megabytes, so she should finish it.",
-    "And I'll email Div the deck after this. He's asked for it twice now and I keep forgetting.",
+    "And I'll email Alex the deck after this. He's asked for it twice now and I keep forgetting.",
     "I know we said Redis last week, but I've been staring at the profile for two days and I don't think "
     "that's right anymore.",
 )
@@ -165,7 +165,7 @@ def test_restraint_gate_blocks_every_route() -> None:
         "ticket_request": {"topic": "security questionnaire"},
         "pr_intent": {"topic": "sso change", "quote": "He said he'd push a branch before the freeze."},
         "message_commitment": {"topic": "deck"},
-        "email_commitment": {"topic": "deck", "entity_refs": {"person": "Div"}},
+        "email_commitment": {"topic": "deck", "entity_refs": {"person": "Alex"}},
         "deadline": {"topic": "deck", "entity_refs": {"deadline_text": "Friday"}},
         "progress_report": {"topic": "onboarding card",
                             "entity_refs": {"linear_identifier": "SHA-6", "percent": 95}},
@@ -417,7 +417,7 @@ def test_speaker_display_name() -> None:
     statements = [statement(speaker="You"), statement(speaker="Them")]
     extraction.apply_speaker_display_names(statements)
     check("the pass rewrites the mic track", statements[0].speaker == "Sharique")
-    check("...and the system track too, so no card says 'Them will email Div'",
+    check("...and the system track too, so no card says 'Them will email Alex'",
           statements[1].speaker == "Guest")
 
     # End to end: the label is rewritten ONCE, in extraction's post-processing,

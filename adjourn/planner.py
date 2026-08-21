@@ -66,12 +66,13 @@ ACTION_KINDS: tuple[str, ...] = (
     "recap_page",            # local recap HTML for the meeting
 )
 
-# Irreversible sends get a visible countdown; everything else fires immediately.
-# The board draws a ring for anything with a non-zero window.
-REGRET_WINDOW_BY_KIND: dict[str, int] = {
-    "slack_send": config.DEFAULT_REGRET_WINDOW_SECONDS,
-    "email_send": config.DEFAULT_REGRET_WINDOW_SECONDS,
-}
+# Slack and email cannot be taken back, so they do not auto-fire. The board
+# holds them in Ready to send until a human edits (or doesn't) and presses Send.
+# A countdown is not an undo for a message that has already left the machine.
+# Anything else with a non-zero window still gets a ring; nothing in the table
+# uses one today.
+REGRET_WINDOW_BY_KIND: dict[str, int] = {}
+SEND_ON_APPROVAL_KINDS: frozenset[str] = frozenset({"slack_send", "email_send"})
 
 # THE TABLE. This is the deterministic core of the product: statement kind ->
 # candidate action kinds, in priority order. A statement kind with an empty tuple
@@ -108,8 +109,8 @@ ROUTING_TABLE: dict[str, tuple[str, ...]] = {
     "question": (),                        # inert on purpose: recap and memory only
     "ticket_request": ("linear_create",),  # "we need a ticket for X"
     "progress_report": ("linear_move",),   # a named item that actually moved
-    "message_commitment": ("slack_send",),  # 60s regret window
-    "email_commitment": ("email_send",),    # 60s regret window
+    "message_commitment": ("slack_send",),  # Ready to send — edit, then Send
+    "email_commitment": ("email_send",),    # Ready to send — edit, then Send
     "deadline": ("calendar_hold",),        # a date someone committed to
     "pr_intent": ("pull_request_stub",),   # "I'll open a PR"
 }
@@ -146,12 +147,15 @@ class Action:
                       same meeting must produce the same key for the same intent,
                       or the reconcile pass will fire it twice.
     regret_window_s — 0 fires immediately; >0 shows a countdown the user can cancel.
+    hold_for_send  — True parks this in Ready to send until a human presses Send.
+                     Slack and email set this; they never auto-fire.
     """
 
     kind: str
     payload: dict = field(default_factory=dict)
     dedup_key: str = ""
     regret_window_s: int = 0
+    hold_for_send: bool = False
 
     # Provenance — carried into ExecutorResult so every card can show its quote.
     quote: str = ""
@@ -163,7 +167,7 @@ class Action:
     @property
     def is_reversible_on_countdown(self) -> bool:
         """True when a human still has time to stop this before it goes out."""
-        return self.regret_window_s > 0
+        return self.hold_for_send or self.regret_window_s > 0
 
     def to_dict(self) -> dict:
         return {
@@ -171,6 +175,7 @@ class Action:
             "payload": self.payload,
             "dedup_key": self.dedup_key,
             "regret_window_s": self.regret_window_s,
+            "hold_for_send": self.hold_for_send,
             "quote": self.quote,
             "speaker": self.speaker,
             "meeting_id": self.meeting_id,
@@ -185,6 +190,7 @@ class Action:
             payload=data.get("payload") or {},
             dedup_key=data.get("dedup_key", ""),
             regret_window_s=int(data.get("regret_window_s", 0)),
+            hold_for_send=bool(data.get("hold_for_send")),
             quote=data.get("quote", ""),
             speaker=data.get("speaker", ""),
             meeting_id=data.get("meeting_id", ""),
@@ -254,12 +260,19 @@ def build_dedup_key(kind: str, *parts: object) -> str:
 # promised Slack message into two queued sends. Diarization is not identity.
 
 
+def requires_send_approval(kind: str) -> bool:
+    """True when this kind waits in Ready to send instead of firing on its own."""
+    return kind in SEND_ON_APPROVAL_KINDS
+
+
 def choose_regret_window(kind: str) -> int:
-    """Seconds of visible countdown for an action kind. 0 means fire now."""
-    if kind not in REGRET_WINDOW_BY_KIND:
+    """Seconds of visible countdown for an action kind. 0 means fire now.
+
+    Slack and email return 0 because they wait for Send; they do not share this
+    window. A kind listed in REGRET_WINDOW_BY_KIND still honours REGRET_WINDOW_SECONDS.
+    """
+    if requires_send_approval(kind) or kind not in REGRET_WINDOW_BY_KIND:
         return 0
-    # Read the configured value rather than the import-time constant, so
-    # REGRET_WINDOW_SECONDS in .env (or a shorter one for the stage) is honoured.
     return config.regret_window_seconds()
 
 
@@ -439,7 +452,7 @@ def _subject_phrase(statement: Statement, fallback: str) -> str:
     """The topic, with any person's name in it title-cased. Pure string handling.
 
     The topic comes from the model, which writes it in running-sentence case, so
-    a subject built straight from it read "Follow-up: deck for div" — a person's
+    a subject built straight from it read "Follow-up: deck for alex" — a person's
     name, lowercased, in the subject line of a real email.
     """
     phrase = _one_line(_statement_topic(statement) or fallback, 60)
@@ -455,7 +468,7 @@ def _subject_phrase(statement: Statement, fallback: str) -> str:
 # Three shapes of sentence reach the planner looking exactly like work and are
 # not work: a negation ("don't email the client yet"), an idea the room threw
 # out ("we could file a ticket but let's not"), and somebody else's commitment
-# being relayed ("Div said he'd send the deck"). extraction.apply_restraint_flags
+# being relayed ("Alex said he'd send the deck"). extraction.apply_restraint_flags
 # marks them deterministically, off the verbatim transcript. This is where the
 # mark is honoured, once, for every action kind at the same time — rather than
 # per-builder, where the next builder anybody adds would quietly not have it.
@@ -988,7 +1001,8 @@ def build_slack_send(
             "human_preview": f"Slack: {_one_line(text, 70)}",
         },
         dedup_key=build_dedup_key("slack_send", meeting_id, channel),
-        regret_window_s=choose_regret_window("slack_send"),
+        regret_window_s=0,
+        hold_for_send=True,
     )
 
 
@@ -1010,7 +1024,7 @@ def build_email_send(
 ) -> Action | None:
     """Send the follow-up email someone promised. Declines when no address resolves.
 
-    A name is not an address. If the address book cannot turn "Div" into an
+    A name is not an address. If the address book cannot turn "Alex" into an
     address, this returns None and the promise shows up in the recap's commitment
     ledger instead — which is honest. Emailing a guessed address is the one
     failure that cannot be apologised for, so the guard runs HERE, at plan time,
@@ -1031,7 +1045,8 @@ def build_email_send(
             "human_preview": f"Email {person or 'the room'}: {_one_line(text, 60)}",
         },
         dedup_key=build_dedup_key("email_send", meeting_id, person or "unaddressed"),
-        regret_window_s=choose_regret_window("email_send"),
+        regret_window_s=0,
+        hold_for_send=True,
     )
     # Pure, stdlib-only address-book lookup. No SMTP connection is opened here.
     from .executors.email_send_executor import resolve_recipients
@@ -1387,7 +1402,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="adjourn.planner")
     parser.add_argument("--demo", action="store_true",
                         help="plan the demo fixture and print the actions (no firing)")
-    parser.add_argument("--fixture", default="agi-living-room")
+    parser.add_argument("--fixture", default="living-room-standup")
     arguments = parser.parse_args()
 
     if not arguments.demo:

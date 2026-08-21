@@ -441,7 +441,7 @@ This is the harder half and most of the code is here.
 
 A meeting is full of sentences that sound like commitments and are not.
 Negations — *"don't email the client yet"*. Ideas that were raised and killed in
-the same breath. Hypotheticals. And reported speech: *"Div said he'd send the
+the same breath. Hypotheticals. And reported speech: *"Alex said he'd send the
 deck"* is somebody else's commitment, mentioned in passing, and firing on it
 means sending mail on behalf of a person who was not in the room. None of these
 fire anything. Reported speech reaches the recap as a third-party note, clearly

@@ -173,6 +173,7 @@ def action_from_pending(entry: PendingAction) -> Action:
         payload=entry.payload or {},
         dedup_key=entry.dedup_key,
         regret_window_s=entry.regret_window_s,
+        hold_for_send=bool(getattr(entry, "hold_for_send", False)),
         quote=entry.quote,
         speaker=entry.speaker,
         meeting_id=entry.meeting_id,

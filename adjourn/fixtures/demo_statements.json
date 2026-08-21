@@ -1,13 +1,13 @@
 {
-  "_comment": "Ground truth for agi-living-room.jsonl, hand-written. This is THE demo meeting: eleven statements covering all ten statement kinds, and between them every one of the eight action kinds. Loaded verbatim by extraction.load_fixture_statements('agi-living-room') when no engine is available — the floor under the demo. Also the scoring target for tests/test_understanding_extraction.py.",
+  "_comment": "Ground truth for living-room-standup.jsonl, hand-written. This is THE demo meeting: eleven statements covering all ten statement kinds, and between them every one of the eight action kinds. Loaded verbatim by extraction.load_fixture_statements('living-room-standup') when no engine is available — the floor under the demo. Also the scoring target for tests/test_understanding_extraction.py.",
   "meeting": {
-    "meeting_id": "agi-living-room",
+    "meeting_id": "living-room-standup",
     "title": "Adjourn standup — living room",
     "date": "2026-08-21"
   },
   "statements": [
     {
-      "segment_id": "agi-s05",
+      "segment_id": "lr-s05",
       "speaker": "Them",
       "topic": "cache layer",
       "claim": "Drop Redis on issue #2 and use an in-process LRU instead, because the profiled hot set is only sixty megabytes.",
@@ -18,7 +18,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s09",
+      "segment_id": "lr-s09",
       "speaker": "Them",
       "topic": "cache layer",
       "claim": "Priya takes the cache layer work over from Sam, since she found the sixty-megabyte hot set.",
@@ -29,7 +29,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s11",
+      "segment_id": "lr-s11",
       "speaker": "Them",
       "topic": "cache layer",
       "claim": "The cache layer ship date moves from the twenty-second to the twenty-fifth to give Priya the weekend.",
@@ -40,7 +40,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s13",
+      "segment_id": "lr-s13",
       "speaker": "Them",
       "topic": "webhook signature verification",
       "_comment": "Deliberately NOT 'retry logic': SHA-7 on the seeded Linear board is already 'Retry logic for executor failures'. A ticket_request that duplicates a ticket the board already has is the one thing this beat must not demonstrate.",
@@ -52,7 +52,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s15",
+      "segment_id": "lr-s15",
       "speaker": "Them",
       "topic": "streaming adapter",
       "claim": "SHA-5 is about eighty percent done and should be in review tomorrow.",
@@ -64,7 +64,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s17",
+      "segment_id": "lr-s17",
       "speaker": "Them",
       "topic": "config loader",
       "_comment": "Named 'config loader' rather than 'storage adapter' so it cannot be confused — on stage or by the extractor's topic normalization — with SHA-5, the STREAMING adapter two beats earlier.",
@@ -76,19 +76,19 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s21",
+      "segment_id": "lr-s21",
       "speaker": "Them",
       "topic": "auth migration",
       "claim": "The auth migration has run clean in dev all week with nothing to report.",
       "kind": "update",
-      "_comment": "entity_refs is deliberately EMPTY. 'issue one' is spoken in agi-s20 (the question), not in agi-s21, and rule 8 forbids carrying a handle across segments — an inferred issue number is how a comment lands on the wrong issue. The planner resolves this one through memory.find_issue_for_topic('auth migration') -> 1 instead.",
+      "_comment": "entity_refs is deliberately EMPTY. 'issue one' is spoken in lr-s20 (the question), not in lr-s21, and rule 8 forbids carrying a handle across segments — an inferred issue number is how a comment lands on the wrong issue. The planner resolves this one through memory.find_issue_for_topic('auth migration') -> 1 instead.",
       "entity_refs": {},
       "quote": "It's been running clean in dev all week. Nothing to report, which is the report.",
       "source": "final",
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s22",
+      "segment_id": "lr-s22",
       "speaker": "You",
       "topic": "streaming adapter",
       "claim": "Is the rate-limit ticket still needed, or does SHA-5 already cover the same work?",
@@ -99,7 +99,7 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s24",
+      "segment_id": "lr-s24",
       "speaker": "You",
       "topic": "meeting summary",
       "claim": "Slack the channel the meeting summary once the standup is over.",
@@ -110,18 +110,18 @@
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s25",
+      "segment_id": "lr-s25",
       "speaker": "Them",
       "topic": "demo deck",
-      "claim": "Email Div the demo deck after the standup; he has asked for it twice.",
+      "claim": "Email Alex the demo deck after the standup; he has asked for it twice.",
       "kind": "email_commitment",
-      "entity_refs": {"person": "Div"},
-      "quote": "And I'll email Div the deck after this. He's asked for it twice now and I keep forgetting.",
+      "entity_refs": {"person": "Alex"},
+      "quote": "And I'll email Alex the deck after this. He's asked for it twice now and I keep forgetting.",
       "source": "final",
       "engine": "fixtures"
     },
     {
-      "segment_id": "agi-s26",
+      "segment_id": "lr-s26",
       "speaker": "You",
       "topic": "cache layer",
       "claim": "Both of us review the cache layer on Friday to see where it landed.",

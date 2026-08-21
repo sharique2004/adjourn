@@ -41,6 +41,11 @@
                Consolas, monospace;
 
   --radius: 14px;
+  /* THE PAGE IS THE MASTHEAD. Header, tabs, cards and rail all share this
+   * width, so the right edge of a card is the right edge of "The meeting is
+   * the to-do." The rail used to hang 362px past that line
+   * (--page + --rail-width + --rail-gap) and on a laptop — or at presentation
+   * zoom — that was a horizontal scroll. */
   --page: 1080px;
 
   /* ONE SET OF CURVES, so everything that moves on this app moves in the same
@@ -58,9 +63,10 @@
    * about. At 1512x900 the chrome above the first card must stay under 180px:
    * masthead 88 + tab row 45 = 133 measured, which leaves 767px for the column
    * title and the first three cards. The rail lives to the RIGHT of the cards
-   * and therefore costs this budget nothing. */
-  --rail-width: 336px;
-  --rail-gap: 26px;
+   * INSIDE --page (300px + 20px gap leaves ~760px for the feed) and therefore
+   * still costs this budget nothing vertically. */
+  --rail-width: 300px;
+  --rail-gap: 20px;
   /* The masthead is sticky at top:0 and measures ~88px; the rail sticks just
    * under it. Overridden in the short-viewport block, where the masthead is
    * squeezed further. */
@@ -88,11 +94,18 @@
 
 * { box-sizing: border-box; }
 
-html { background: var(--ink); }
+html {
+  background: var(--ink);
+  /* clip, not hidden: hidden on the root creates a scroll container and
+   * quietly kills position:sticky on the masthead and the rail. clip just
+   * forbids a stray pixel of horizontal overflow. */
+  overflow-x: clip;
+}
 
 body {
   margin: 0;
-  padding: 0 24px 96px;
+  padding: 0 clamp(14px, 2.4vw, 24px) 96px;
+  overflow-x: clip;
   background:
     radial-gradient(1200px 480px at 50% -180px, rgba(255, 255, 255, 0.045), transparent 70%),
     var(--ink);
@@ -136,7 +149,7 @@ body > footer { width: 100%; }
   top: 0;
   z-index: 20;
   margin: 0 auto;
-  max-width: var(--page);
+  max-width: min(var(--page), 100%);
   padding: 16px 0 10px;
   background: linear-gradient(var(--ink) 72%, rgba(10, 11, 13, 0));
 }
@@ -196,7 +209,7 @@ body > footer { width: 100%; }
  * here is what makes the board-served pages behave the same.) */
 .viewbar {
   margin: 8px auto 14px;
-  max-width: var(--page);
+  max-width: min(var(--page), 100%);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -267,15 +280,16 @@ body > footer { width: 100%; }
 
 .board, .ledger {
   margin: 0 auto;
-  max-width: var(--page);
+  max-width: min(var(--page), 100%);
 }
 
-/* CARDS LEFT, RAIL RIGHT. Below 1180px the rail stacks under the cards rather
- * than squeezing them: a 700px card column with a 336px rail beside it is two
- * narrow columns and no good column. */
+/* CARDS LEFT, RAIL RIGHT — both inside the masthead. The rail used to be
+ * extra width past "The meeting is the to-do.", which is how the cards
+ * escaped the page. Below 1180px it stacks rather than squeezing a ~760px
+ * feed into a laptop window that cannot hold both columns. */
 @media (min-width: 1180px) {
   .board-split {
-    max-width: calc(var(--page) + var(--rail-width) + var(--rail-gap));
+    max-width: min(var(--page), 100%);
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--rail-width);
     gap: var(--rail-gap);
@@ -283,9 +297,11 @@ body > footer { width: 100%; }
   }
 }
 
-.board-cards { min-width: 0; }
-
-.board-rail { min-width: 0; }
+.board-cards,
+.board-rail {
+  min-width: 0;
+  max-width: 100%;
+}
 
 @media (min-width: 1180px) {
   /* Sticky under the masthead, so the thinking stays on screen while the card
@@ -326,11 +342,76 @@ body > footer { width: 100%; }
   font-variant-numeric: tabular-nums;
 }
 
+/* --- meetings on Follow-through ------------------------------------------ */
+
+.meeting-block {
+  margin: 0 0 36px;
+  min-width: 0;
+}
+
+.meeting-block + .meeting-block {
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.meeting-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
+.meeting-block-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.meeting-block-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.meeting-block-title a:hover {
+  color: var(--text-dim);
+}
+
+.meeting-block-title a:focus-visible {
+  outline: 2px solid var(--text-dim);
+  outline-offset: 3px;
+}
+
+.meeting-block-meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--text-dimmer);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.meeting-block-when {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.meeting-block .column {
+  margin-bottom: 16px;
+}
+
 /* --- card ---------------------------------------------------------------- */
 
 .card {
   position: relative;
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -461,6 +542,7 @@ body > footer { width: 100%; }
   line-height: 1.32;
   letter-spacing: -0.012em;
   color: var(--text);
+  overflow-wrap: break-word;
 }
 
 .quote {
@@ -472,6 +554,7 @@ body > footer { width: 100%; }
   font-style: italic;
   font-size: 16px;
   line-height: 1.45;
+  overflow-wrap: break-word;
 }
 
 /* THE QUOTE IS A LINK, AND LOOKS LIKE THE QUOTE. No blue, no underline at rest:
@@ -524,6 +607,16 @@ body > footer { width: 100%; }
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 13px;
+}
+
+/* Elapsed + Undo travel as one unit, so the button never strands itself on
+ * the far edge of a wide card while the link sits alone on the left. */
+.card-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .link {
@@ -598,6 +691,87 @@ body > footer { width: 100%; }
   }
 }
 
+/* --- Ready to send ------------------------------------------------------- */
+
+.column-compose { margin-bottom: 28px; }
+
+.card-compose .headline {
+  font-size: 18px;
+}
+
+.compose-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.compose-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.compose-subject,
+.compose-body {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  background: var(--ink);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.compose-body {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.compose-subject:focus,
+.compose-body:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--text) 45%, transparent);
+}
+
+.compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.send-now {
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid var(--text);
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .send-now:hover {
+    filter: brightness(1.08);
+  }
+}
+
+.send-now:active { transform: scale(0.97); }
+.send-now[disabled] { opacity: 0.4; cursor: default; transform: none; }
+.send-now:focus-visible { outline: 2px solid var(--text-dim); outline-offset: 2px; }
+
 /* --- pending / countdown ------------------------------------------------- */
 
 .card-pending { background: var(--ink-raised-2); }
@@ -606,7 +780,10 @@ body > footer { width: 100%; }
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
+
+.pending-row .undo-cancel { flex: 0 0 auto; }
 
 .pending-copy { flex: 1 1 auto; min-width: 0; }
 .pending-copy .headline { font-size: 20.5px; }
@@ -1028,7 +1205,7 @@ body > footer { width: 100%; }
    * stranding it mid-window; 46px stays the floor on a page that overflows. */
   margin-top: auto;
   padding-top: 46px;
-  max-width: var(--page);
+  max-width: min(var(--page), 100%);
   display: flex;
   flex-wrap: wrap;
   gap: 9px;
@@ -1586,16 +1763,18 @@ body > footer { width: 100%; }
  * split layout normally needs, so the plain rule would stack the rail UNDER the
  * card feed, which at 514px of height means the thing the presenter is narrating
  * is off-screen entirely. A short viewport is a presenting viewport, so the
- * split is forced back on and the rail is narrowed to 248px instead.
+ * split is forced back on and the rail is narrowed to 240px instead — still
+ * inside --page, never --page plus the rail, which is how 175% used to grow a
+ * 1346px board on an 864px window.
  *
  * Three cards do not fit in 514px at a legible card size and no layout can make
  * them: measured at 864x514 the first card starts at 108px and the second ends
  * at ~480px, so it is two cards and the whole live region. That is the honest
  * ceiling at that zoom; 1512x900 is where the three-card number holds. */
 @media (max-height: 640px) and (min-width: 820px) {
-  :root { --rail-width: 248px; --rail-gap: 18px; }
+  :root { --rail-width: 240px; --rail-gap: 16px; }
   .board-split {
-    max-width: calc(var(--page) + var(--rail-width) + var(--rail-gap));
+    max-width: min(var(--page), 100%);
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--rail-width);
     gap: var(--rail-gap);

@@ -96,15 +96,16 @@
       {% elif card.external_id %}
         <span class="external-id">{{ card.external_id }}</span>
       {% endif %}
-      <span class="spacer"></span>
-      <span class="elapsed">{{ card.elapsed }}</span>
-      {% if card.can_undo %}
-        <button class="undo" type="button" data-undo="{{ card.id }}"
-                title="{{ card.undo_title }}"
-                data-undo-label="{{ card.undo_label }}">{{ card.undo_label }}</button>
-      {% else %}
-        <span class="undo-note">{{ card.undo_note }}</span>
-      {% endif %}
+      <div class="card-end">
+        <span class="elapsed">{{ card.elapsed }}</span>
+        {% if card.can_undo %}
+          <button class="undo" type="button" data-undo="{{ card.id }}"
+                  title="{{ card.undo_title }}"
+                  data-undo-label="{{ card.undo_label }}">{{ card.undo_label }}</button>
+        {% else %}
+          <span class="undo-note">{{ card.undo_note }}</span>
+        {% endif %}
+      </div>
     </footer>
   </div>
 </article>
@@ -189,10 +190,10 @@
 {% macro board_header(state) -%}
 <div class="masthead-inner">
   <div class="masthead-left">
-    {# THE MASTHEAD NEVER PRINTS A SLUG. display_title is the recording's own
-       title when it has one and a readable rendering of its id when it does
-       not; 'Adjourn' is the cold open, before any meeting has been named. #}
-    <h1 class="meeting-title">{{ state.meeting.display_title or state.meeting.title or 'Adjourn' }}</h1>
+    {# FOLLOW-THROUGH IS CROSS-MEETING. The stream below is grouped by meeting,
+       so this title is the page, not the latest recording — otherwise a card
+       from Tuesday opened under Wednesday's name. #}
+    <h1 class="meeting-title">Follow-through</h1>
     <p class="meeting-meta">
       {% if state.meeting.duration %}<span class="meta-item">{{ state.meeting.duration }}</span>{% endif %}
       <span class="meta-item totals" data-totals>{{ state.totals_line }}</span>
@@ -358,11 +359,104 @@
 </section>
 {%- endmacro -%}
 
+{% macro compose_card(item) -%}
+{# Slack and email wait here. The meeting decided to send; a human still has to
+   let the words leave. Edit, then Send. Don't send is the last chance. #}
+<article class="card card-pending card-compose" data-kind="{{ item.kind }}" data-key="{{ item.id }}"
+         data-hold="1">
+  <div class="card-rail" aria-hidden="true"></div>
+  <div class="card-body">
+    <header class="card-top">
+      <span class="chip">{{ item.label }}</span>
+      <span class="badge badge-holding">DRAFT</span>
+      <span class="spacer"></span>
+      <span class="stamp">waiting for you</span>
+    </header>
+
+    <h2 class="headline">{{ item.destination }}</h2>
+    {% if item.quote %}
+    <blockquote class="quote">
+      {% if item.transcript_url %}
+      <a class="quote-text quote-trace" href="{{ item.transcript_url }}"
+         title="Read this line in the transcript">&ldquo;{{ item.quote }}&rdquo;<span class="quote-trace-mark" aria-hidden="true">&nbsp;&rarr;</span></a>
+      {% else %}
+      <span class="quote-text">&ldquo;{{ item.quote }}&rdquo;</span>
+      {% endif %}
+      {% if item.speaker %}<cite class="quote-speaker">{{ item.speaker }}</cite>{% endif %}
+    </blockquote>
+    {% endif %}
+
+    <div class="compose-fields">
+      {% if item.kind == 'email_send' %}
+      <label class="compose-label">Subject
+        <input class="compose-subject" type="text" name="subject"
+               value="{{ item.draft_subject }}" autocomplete="off">
+      </label>
+      {% endif %}
+      <label class="compose-label">Message
+        <textarea class="compose-body" name="text" rows="4">{{ item.draft_body }}</textarea>
+      </label>
+    </div>
+
+    <div class="compose-actions">
+      <button class="undo undo-cancel" type="button" data-undo="{{ item.id }}"
+              data-undo-label="Don't send">Don't send</button>
+      <button class="send-now" type="button" data-send="{{ item.id }}"
+              data-send-label="Send">Send</button>
+    </div>
+  </div>
+</article>
+{%- endmacro -%}
+
 {% macro pending_column(pending) -%}
-{% if pending %}
+{% set holds = pending | selectattr('hold_for_send') | list %}
+{% set countdown = pending | rejectattr('hold_for_send') | list %}
+{% if holds %}
+<section class="column column-compose" aria-label="Messages waiting to send">
+  <h2 class="column-title">Ready to send <span class="column-count">{{ holds | length }}</span></h2>
+  {% for item in holds %}{{ compose_card(item) }}{% endfor %}
+</section>
+{% endif %}
+{% if countdown %}
 <section class="column column-pending" aria-label="Actions inside their regret window">
-  <h2 class="column-title">In flight <span class="column-count">{{ pending | length }}</span></h2>
-  {% for item in pending %}{{ pending_card(item) }}{% endfor %}
+  <h2 class="column-title">In flight <span class="column-count">{{ countdown | length }}</span></h2>
+  {% for item in countdown %}{{ pending_card(item) }}{% endfor %}
+</section>
+{% endif %}
+{%- endmacro -%}
+
+{% macro meeting_block(group) -%}
+<section class="meeting-block" data-meeting="{{ group.meeting_id }}"
+         aria-label="{{ group.display_title }}">
+  <header class="meeting-block-head">
+    {% if group.href %}
+    <h2 class="meeting-block-title"><a href="{{ group.href }}">{{ group.display_title }}</a></h2>
+    {% else %}
+    <h2 class="meeting-block-title">{{ group.display_title }}</h2>
+    {% endif %}
+    <p class="meeting-block-meta">
+      {% if group.when %}<span class="meeting-block-when">{{ group.when }}</span>{% endif %}
+      {% if group.pending_count %}
+      <span>{{ group.pending_count }} to send</span>
+      {% endif %}
+      <span>{{ group.executed_count }} executed</span>
+    </p>
+  </header>
+  {% if group.pending %}{{ pending_column(group.pending) }}{% endif %}
+  {% for card in group.cards %}{{ action_card(card) }}{% endfor %}
+</section>
+{%- endmacro -%}
+
+{% macro followthrough_column(groups, last_adjourned=none) -%}
+{% if groups %}
+<div class="followthrough-stream" aria-label="Follow-through by meeting">
+  {% for group in groups %}{{ meeting_block(group) }}{% endfor %}
+</div>
+{% else %}
+{% if last_adjourned %}{{ last_adjourned_panel(last_adjourned) }}{% endif %}
+<section class="empty-state{{ ' is-quiet' if last_adjourned else '' }}" aria-label="No actions yet">
+  <span class="empty-pulse" aria-hidden="true"></span>
+  <p class="empty-line">{{ empty_state_line }}</p>
 </section>
 {% endif %}
 {%- endmacro -%}
@@ -488,8 +582,8 @@
    share the first screen at 1512x900 — measured, see static/board.css. #}
 <main class="board board-split">
   <div class="board-cards">
-    <div id="pending">{{ pending_column(state.pending) }}</div>
-    <div id="cards">{{ card_column(state.cards, state.last_adjourned) }}</div>
+    <div id="pending" hidden></div>
+    <div id="cards">{{ followthrough_column(state.meeting_groups, state.last_adjourned) }}</div>
   </div>
   <aside class="board-rail" id="guts" data-guts aria-label="What the pipeline is doing">
     {{ guts_panel(state.pipeline) }}

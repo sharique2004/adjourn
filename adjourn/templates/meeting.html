@@ -8,7 +8,7 @@
   Every macro comes from board.html: one card shape, one set of badges, one undo
   affordance across the whole app.
 #}
-{% from "board.html" import action_card, pending_card, shell_tabbar with context %}
+{% from "board.html" import action_card, pending_column, shell_tabbar with context %}
 <!doctype html>
 <html lang="en" data-view="meeting">
 <head>
@@ -49,12 +49,7 @@
     <a class="link" href="/">All meetings' actions</a>
   </nav>
 
-  {% if meeting.pending %}
-  <section class="column column-pending" aria-label="Actions inside their regret window">
-    <h2 class="column-title">In flight <span class="column-count">{{ meeting.pending | length }}</span></h2>
-    {% for item in meeting.pending %}{{ pending_card(item) }}{% endfor %}
-  </section>
-  {% endif %}
+  {{ pending_column(meeting.pending) }}
 
   {% if meeting.cards %}
   <section class="column column-done" aria-label="Actions Adjourn executed for this meeting">

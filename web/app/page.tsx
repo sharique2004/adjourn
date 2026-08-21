@@ -1,102 +1,96 @@
+{/*
+  THESIS: the meeting itself becomes the work. Refuses a metric hero.
+  OWN-WORLD: warm black, brass, Gloock for speech, Schibsted Grotesk for acts.
+  STORY: stop talking; follow-through is already on the table.
+  FIRST VIEWPORT: thesis left, quote peeling into receipts right, two buttons.
+  FORM: split first viewport with one authored motion.
+*/}
 import Link from 'next/link';
-import { Footer, KindChip, TopBar } from './components/ui';
-import { getBoard } from '../lib/read';
-import { EXECUTOR_KINDS } from '../lib/types';
+import { Gloock, Schibsted_Grotesk } from 'next/font/google';
+import { PRODUCT_URL } from '../lib/product';
+import './landing.css';
 
-export const dynamic = 'force-dynamic';
+const gloock = Gloock({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-gloock',
+  display: 'swap',
+});
 
-/** Three factual lines. No adjectives that cannot be checked. */
-const LINES = [
-  'The recording stops. Extraction runs on the Mac and the first action fires in about four seconds.',
-  'Decisions and commitments become GitHub comments, Linear tickets, draft PRs, calendar holds and recap pages — fired, not suggested.',
-  'Slack and email sends wait 60 seconds behind a visible countdown. Every fire writes a receipt, wifi or no wifi.',
+const grotesk = Schibsted_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-grotesk',
+  display: 'swap',
+});
+
+export const dynamic = 'force-static';
+
+const RECEIPTS = [
+  { chip: 'Slack', text: 'Channel summary, waiting in Ready to send.', flag: 'Draft', live: false },
+  { chip: 'Linear', text: 'SHA-16 filed in Backlog from the room.', flag: 'Live', live: true },
+  { chip: 'GitHub', text: 'What changed, commented on issue #2.', flag: 'Live', live: true },
 ];
 
-const SPEC: Array<[(typeof EXECUTOR_KINDS)[number], string]> = [
-  ['github_update', 'Comments what changed on the issue the decision was about.'],
-  ['linear_create', 'Files the ticket someone asked for, assigned to whoever asked.'],
-  ['linear_move', 'Moves an existing ticket to the state the update implies.'],
-  ['pull_request_stub', 'Opens a draft PR carrying the decision and the quote behind it.'],
-  ['slack_send', 'Posts the message someone promised, after the 60s regret window.'],
-  ['email_send', 'Sends the email someone promised, after the same window.'],
-  ['calendar_hold', 'Holds the time the meeting agreed to, with the right people on it.'],
-  ['recap_page', 'Writes the recap: decisions, commitments, unanswered questions.'],
-];
-
-export default async function LandingPage() {
-  const board = await getBoard();
-  const meetings = board.data.groups.length;
-  const executions = board.data.execution_count;
-
+export default function LandingPage() {
   return (
-    <>
-      <TopBar current="/" />
-      <main className="shell">
-        <section className="hero">
-          <h1>Adjourn</h1>
-          <p className="tagline">The meeting is the to-do.</p>
-          <ul className="hero-lines">
-            {LINES.map((line, i) => (
-              <li key={line}>
-                <span className="idx">{String(i + 1).padStart(2, '0')}</span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="hero-cta">
-            <Link className="btn" href="/board">
-              Follow-through board →
-            </Link>
-            <Link className="btn btn-quiet" href="/ledger">
-              Commitment ledger
-            </Link>
-          </div>
-        </section>
+    <div className={`lp ${gloock.variable} ${grotesk.variable}`}>
+      <div className="lp-vignette" aria-hidden="true" />
+      <div className="lp-frame">
+        <header className="lp-mark">
+          <b>Adjourn</b>
+          <span>The meeting is the to-do</span>
+        </header>
 
-        <section className="section">
-          <div className="section-head">
-            <h2>Executors</h2>
-            <span className="note">8 kinds</span>
+        <div className="lp-stage">
+          <div className="lp-copy">
+            <p className="lp-kicker">When the recording stops</p>
+            <h1 className="lp-title">
+              The meeting
+              <br />
+              is the <em>to-do</em>.
+            </h1>
+            <p className="lp-lede">
+              Decisions, promises, and tickets leave the room as work — not as a
+              summary you still have to turn into one.
+            </p>
+            <div className="lp-cta">
+              <a className="lp-btn lp-btn-primary" href={PRODUCT_URL}>
+                Open the product
+              </a>
+              <Link className="lp-btn lp-btn-ghost" href="/demo">
+                See the demo
+              </Link>
+            </div>
           </div>
-          <div className="spec-strip">
-            {SPEC.map(([kind, desc]) => (
-              <div className="spec-row" key={kind}>
-                <KindChip kind={kind} />
-                <span className="desc">{desc}</span>
-              </div>
-            ))}
-          </div>
-        </section>
 
-        <section className="section">
-          <div className="section-head">
-            <h2>Topology</h2>
-            <span className="note">read-only surface</span>
+          <div className="lp-proof">
+            <div className="lp-stopped" aria-hidden="true">
+              {[18, 28, 12, 32, 20, 36, 14, 24, 10, 30, 16, 22, 8, 26, 12].map((h, i) => (
+                <span key={i} style={{ height: h, animationDelay: `${i * 40}ms` }} />
+              ))}
+            </div>
+            <blockquote className="lp-quote">
+              “Alright. I&apos;ll Slack the channel the summary once we&apos;re done here.”
+              <cite>Spoken, then followed through</cite>
+            </blockquote>
+            <ul className="lp-receipts">
+              {RECEIPTS.map((row) => (
+                <li className="lp-receipt" key={row.chip}>
+                  <span className="lp-chip">{row.chip}</span>
+                  <p>{row.text}</p>
+                  <span className={row.live ? 'lp-flag lp-flag-live' : 'lp-flag'}>{row.flag}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="stat-row">
-            <span>
-              mirrored meetings <b>{meetings}</b>
-            </span>
-            <span>
-              execution receipts <b>{executions}</b>
-            </span>
-            <span>
-              source <b>{board.source === 'cloud' ? 'falkordb cloud' : 'bundled snapshot'}</b>
-            </span>
-          </div>
-          <p className="prose" style={{ marginTop: 22 }}>
-            The Mac is authoritative. Extraction, execution and undo all run locally and keep
-            running when the network does not. Each result is mirrored to a FalkorDB Cloud graph as
-            an <code>(:Execution)-[:FROM_MEETING]-&gt;(:Meeting)</code> receipt alongside the{' '}
-            <code>Person / Statement / Issue</code> graph the meeting produced.
-          </p>
-          <p className="prose" style={{ marginTop: 14 }}>
-            <strong>This site reads that mirror and nothing else.</strong> It cannot fire an action
-            and it cannot undo one — undo lives on the Mac board, next to the thing that fired.
-          </p>
-        </section>
-      </main>
-      <Footer source={board.source} reason={board.reason} />
-    </>
+        </div>
+
+        <footer className="lp-foot">
+          <span>Local-first. A model extracts. A table decides.</span>
+          <span>Slack and email wait for you.</span>
+        </footer>
+      </div>
+    </div>
   );
 }

@@ -1,16 +1,17 @@
 """The follow-through board — Adjourn's demo surface. (Lane E)
 
 A small Flask app on 127.0.0.1 that renders what Adjourn actually did after a
-meeting ended: one card per fired action, a countdown ring for anything still
-inside its regret window, and an honest live/sim badge on every card.
+meeting ended: one card per fired action, a Ready to send box for Slack and
+email (edit, then Send), a countdown ring for anything still inside a regret
+window, and an honest live/sim badge on every card.
 
 READ-MOSTLY BY DESIGN. The board owns no state. It reads two files:
 
     ~/.meetingscribe/executions.jsonl   (results.append_execution writes it)
     adjourn/state/pending.json          (orchestrator writes it)
 
-and the only thing it writes is an undo, which it performs by asking the
-orchestrator/executor to do it — never by editing either file itself.
+and the only writes are undo, cancel, and send — each performed by asking the
+orchestrator/executor, never by editing either file itself.
 
 WHY POLLING AND NOT SSE. One 1s fetch of a small JSON document has no
 reconnect logic, no half-open connections, no proxy buffering, and no way to
@@ -45,7 +46,8 @@ Routes:
     GET  /api/pipeline          watcher / extraction / planner / executor phases
     GET  /api/ledger            ledger as JSON
     GET  /api/connections       the connections page as JSON
-    POST /undo/<card_id>        cancel a countdown, or undo a fired action
+    POST /undo/<card_id>        cancel a draft or countdown, or undo a fired action
+    POST /send/<card_id>        send a Slack or email draft (after optional edits)
     GET  /healthz               liveness, for the integration pass
 """
 
@@ -175,13 +177,39 @@ def display_directory_label(path: Path | str) -> str:
 
 # Words that are shouted rather than spelled. Anything not in here is written the
 # way a person writes it in a sentence — lower case unless it starts the title.
+#
+# NO COMPANY NAMES IN HERE. This table used to hold an organisation prefix,
+# which is how the slug of the demo tape came out of the fallback as a
+# three-letter shout in the 28px masthead — a name nobody typed, minted by a
+# title-caser, on the one frame the room reads first. A slug segment that
+# happens to spell an organisation is not an acronym this function is allowed
+# to invent; the only members are the ones that are unreadable any other way
+# (PR, API, SHA).
 _MEETING_ID_ACRONYMS = frozenset({
-    "agi", "pr", "prs", "ai", "api", "ui", "ux", "sha", "cli", "llm", "qa", "kpi",
+    "pr", "prs", "ai", "api", "ui", "ux", "sha", "cli", "llm", "qa", "kpi",
 })
+
+# THE ONE NAME A KNOWN TAPE ANSWERS TO. A fixture is not a recording, so there is
+# no meeting.json to carry a title; the tape's own `meta.title` is read first
+# (see _read_meeting_document -> fixture_library), and this is the belt to that
+# brace for any path that only ever holds an id — the archived-journal reader and
+# the memory reader both do. Keyed on the internal id so the internal id is never
+# the thing a reader sees.
+_MEETING_DISPLAY_TITLES: dict[str, str] = {
+    "living-room-standup": "Living room standup",
+    "agi-living-room": "Living room standup",
+    "agi-living-room-standup": "Living room standup",
+    "prior-standup": "Adjourn standup — 14 Aug",
+    "pr-review-beat": "Adjourn standup — PR review beat",
+}
+
+# A leftover organisation prefix on a slug. Stripped so it can never be the
+# first word of a masthead, even for an id that is not in the table above.
+_MEETING_ID_DROPPED_TOKENS = frozenset({"agi"})
 
 
 def humanize_meeting_id(meeting_id: str) -> str:
-    """'agi-living-room' -> 'AGI living room'. A title when there is no title.
+    """'living-room-standup' -> 'Living room standup'. A title when there is no title.
 
     A SLUG IS AN ADDRESS, NOT A NAME. It is right in a URL, in the journal and in
     the small monospace `external-id` chip at the foot of a card — all places a
@@ -192,7 +220,16 @@ def humanize_meeting_id(meeting_id: str) -> str:
 
     Returns "" for an empty id so callers can keep their own last-resort phrase.
     """
-    words = [word for word in re.split(r"[-_\s]+", str(meeting_id or "")) if word]
+    raw = str(meeting_id or "").strip()
+    known = _MEETING_DISPLAY_TITLES.get(raw)
+    if known:
+        return known
+    words = [word for word in re.split(r"[-_\s]+", raw) if word]
+    words = [word for word in words if word.lower() not in _MEETING_ID_DROPPED_TOKENS]
+    stripped_key = "-".join(word.lower() for word in words)
+    known = _MEETING_DISPLAY_TITLES.get(stripped_key)
+    if known:
+        return known
     # A trailing capture stamp ("…-20260821", "…-041329") is machine bookkeeping
     # and never part of what the meeting was called.
     while words and words[-1].isdigit() and len(words[-1]) >= 6:
@@ -209,8 +246,8 @@ def humanize_meeting_id(meeting_id: str) -> str:
 
 
 # A CARD LINKS TO A TRANSCRIPT ONLY IF THERE IS ONE. The default `--replay` tape
-# is a FIXTURE (agi-living-room): it produces real cards with real quotes, but no
-# recording was ever made, so /meetings/agi-living-room is a 404. Linking anyway
+# is a FIXTURE (living-room-standup): it produces real cards with real quotes, but no
+# recording was ever made, so /meetings/living-room-standup is a 404. Linking anyway
 # would put a dead door under the quote on the demo's own default path. So the
 # board asks the library first — cheaply, because the answer is cached: a hit is
 # permanent (a recording does not un-record), a miss expires in seconds so that a
@@ -234,7 +271,7 @@ def meeting_has_transcript(meeting_id: str) -> bool:
         # TRUTHY, not `is not None`. meetingscribe_source.read_meeting_json answers
         # an EMPTY DICT for an id it does not hold, which is a dict and therefore
         # passed an `is not None` test — that is exactly how the fixture tape
-        # (agi-living-room) got a link to a page that 404s. An empty document is
+        # (living-room-standup) got a link to a page that 404s. An empty document is
         # not a transcript.
         found = bool(_read_meeting_document(meeting_id))
     except Exception:  # noqa: BLE001 — an unreadable library is "no link", not a 500
@@ -335,6 +372,15 @@ def format_duration(seconds: float | int | None) -> str:
     return f"{minutes}:{second:02d}"
 
 
+def format_meeting_when(iso_timestamp: str) -> str:
+    """'21 Aug · 14:13' — when this meeting's last action landed, in local time."""
+    moment = parse_timestamp(iso_timestamp)
+    if not moment:
+        return ""
+    local = moment.astimezone()
+    return f"{local.day} {local.strftime('%b')} · {local.strftime('%H:%M')}"
+
+
 def format_elapsed_since(iso_timestamp: str, now: datetime | None = None) -> str:
     """'just now' / '38s ago' / '4m ago' — the relative stamp under each card."""
     moment = parse_timestamp(iso_timestamp)
@@ -373,7 +419,7 @@ def describe_undo_affordance(card: dict) -> tuple[bool, str]:
     if card["undone"]:
         return False, "undone"
     if card["kind"] == "email_send" and card["mode"] == results.MODE_LIVE:
-        return False, "sent · the countdown was the undo"
+        return False, "sent · cannot be unsent"
     if not card["has_undo_payload"]:
         return False, "no undo handle"
     return True, ""
@@ -538,10 +584,65 @@ def record_carries_conflict(record: dict) -> bool:
     return planner.LABEL_DECISION_CHANGED in labels
 
 
+def compose_destination(item: orchestrator.PendingAction) -> str:
+    """Where this draft will go — shown above the editor, not inside it."""
+    payload = item.payload or {}
+    if item.kind == "email_send":
+        recipients = payload.get("to") or []
+        if isinstance(recipients, str):
+            recipients = [recipients]
+        named = [str(address).strip() for address in recipients if str(address).strip()]
+        if named:
+            return "To " + ", ".join(named)
+        person = str(payload.get("person") or "").strip()
+        return f"To {person}" if person else "Email"
+    if item.kind == "slack_send":
+        try:
+            from .executors import slack_send_executor
+
+            action = planner.Action(
+                kind="slack_send",
+                payload=payload,
+                meeting_id=item.meeting_id or "",
+            )
+            channel = (
+                slack_send_executor.resolve_channel(action)
+                or slack_send_executor.PLACEHOLDER_CHANNEL
+            )
+        except Exception:  # noqa: BLE001 — a missing secret still needs a line
+            channel = ""
+        return f"To {channel}" if channel else "Slack"
+    return KIND_LABELS.get(item.kind, item.kind.replace("_", " ").title())
+
+
+def compose_draft_fields(item: orchestrator.PendingAction) -> tuple[str, str]:
+    """(subject, body) for the Ready-to-send editor. Subject is empty for Slack."""
+    payload = item.payload or {}
+    if item.kind == "email_send":
+        return (
+            str(payload.get("subject") or "").strip(),
+            str(payload.get("body_text") or payload.get("text") or "").strip(),
+        )
+    return "", str(payload.get("text") or "").strip()
+
+
+def sort_pending_items(pending: list[dict]) -> None:
+    """Holds first (Ready to send), then countdowns soonest-first."""
+    pending.sort(
+        key=lambda item: (
+            0 if item.get("hold_for_send") else 1,
+            item.get("created_at") or "",
+            item.get("seconds_remaining") or 0,
+        )
+    )
+
+
 def build_pending_item(item: orchestrator.PendingAction, now: datetime) -> dict:
-    """One countdown entry, shaped for the ring."""
+    """One pending entry, shaped for a countdown ring or a Ready-to-send draft."""
     remaining = item.seconds_remaining(now)
     window = item.regret_window_s or config.regret_window_seconds() or 60
+    subject, body = compose_draft_fields(item)
+    hold = bool(item.hold_for_send)
     return {
         "id": item.dedup_key,
         "dedup_key": item.dedup_key,
@@ -551,12 +652,19 @@ def build_pending_item(item: orchestrator.PendingAction, now: datetime) -> dict:
         "quote": (item.quote or "").strip(),
         "speaker": (item.speaker or "").strip(),
         "meeting_id": item.meeting_id or "",
+        "created_at": item.created_at or "",
         "fire_at": item.fire_at,
-        "fire_clock": format_clock_time(item.fire_at),
+        "fire_clock": format_clock_time(item.fire_at) if item.fire_at else "",
         "regret_window_s": window,
-        "seconds_remaining": int(remaining),
-        "fraction_remaining": max(0.0, min(1.0, remaining / window)) if window else 0.0,
+        "seconds_remaining": 0 if hold else int(remaining),
+        "fraction_remaining": (
+            0.0 if hold or not window else max(0.0, min(1.0, remaining / window))
+        ),
         "status": item.status,
+        "hold_for_send": hold,
+        "destination": compose_destination(item),
+        "draft_subject": subject,
+        "draft_body": body,
         "transcript_url": card_transcript_url(item.meeting_id or ""),
     }
 
@@ -767,6 +875,80 @@ def order_cards_for_reading(cards_in_fire_order: list[dict]) -> list[dict]:
     return pinned + rest
 
 
+def _meeting_activity_stamp(group: dict) -> str:
+    """Newest ISO timestamp in the group — what orders meetings on the board."""
+    stamps = [card.get("fired_at") or "" for card in group.get("cards") or []]
+    stamps += [
+        item.get("created_at") or item.get("fire_at") or ""
+        for item in group.get("pending") or []
+    ]
+    return max(stamps) if stamps else ""
+
+
+def meeting_group_heading(meeting_id: str) -> dict:
+    """Title, time, and the door onto this meeting's own follow-through page."""
+    meeting_id = (meeting_id or "").strip()
+    header = read_meeting_header(meeting_id) if meeting_id else {
+        "title": "",
+        "display_title": "",
+        "duration": "",
+    }
+    title = (
+        (header.get("display_title") or "").strip()
+        or (header.get("title") or "").strip()
+        or humanize_meeting_id(meeting_id)
+        or "Untitled meeting"
+    )
+    return {
+        "meeting_id": meeting_id,
+        "display_title": title,
+        "duration": header.get("duration") or "",
+        "href": f"/meeting/{meeting_id}" if meeting_id else "",
+        "transcript_url": card_transcript_url(meeting_id) if meeting_id else "",
+    }
+
+
+def build_meeting_groups(cards: list[dict], pending: list[dict]) -> list[dict]:
+    """Cards and drafts, bucketed by meeting, newest meeting first.
+
+    Follow-through used to dump every meeting's work into one Executed pile, so a
+    Slack draft from this morning sat next to a Linear move from last week with
+    nothing saying which room they came out of. Each group is one meeting: its
+    drafts (Ready to send) then its cards, in the same reading order the single
+    meeting page uses.
+    """
+    buckets: dict[str, dict] = {}
+
+    def bucket_for(meeting_id: str) -> dict:
+        key = (meeting_id or "").strip()
+        if key not in buckets:
+            buckets[key] = {
+                **meeting_group_heading(key),
+                "cards": [],
+                "pending": [],
+            }
+        return buckets[key]
+
+    for item in pending or []:
+        bucket_for(item.get("meeting_id") or "")["pending"].append(item)
+    for card in cards or []:
+        bucket_for(card.get("meeting_id") or "")["cards"].append(card)
+
+    groups = list(buckets.values())
+    for group in groups:
+        fire_order = sorted(group["cards"], key=lambda card: card.get("fired_at") or "")
+        group["cards"] = order_cards_for_reading(fire_order)
+        sort_pending_items(group["pending"])
+        stamp = _meeting_activity_stamp(group)
+        group["when"] = format_meeting_when(stamp)
+        group["executed_count"] = sum(
+            1 for card in group["cards"] if card.get("state") != "cancelled"
+        )
+        group["pending_count"] = len(group["pending"])
+    groups.sort(key=_meeting_activity_stamp, reverse=True)
+    return groups
+
+
 def executors_pipeline_view(totals: dict, pending_count: int) -> dict:
     """Countdown / live / sim / cancelled, composed from files the board already reads."""
     live = int(totals.get("live") or 0)
@@ -775,7 +957,7 @@ def executors_pipeline_view(totals: dict, pending_count: int) -> dict:
     failed = int(totals.get("failed") or 0)
     parts = []
     if pending_count:
-        parts.append(f"{pending_count} holding")
+        parts.append(f"{pending_count} to send")
     if live:
         parts.append(f"{live} live")
     if sim:
@@ -910,8 +1092,9 @@ def derive_feed_rows(
             f"routed → {kind}" + (f" ×{count}" if count != 1 else ""))
 
     for item in pending:
+        label = "ready to send" if item.get("hold_for_send") else "holding"
         add("executor", "hold", item.get("kind") or "action",
-            f"holding · {item.get('human_preview') or ''}")
+            f"{label} · {item.get('human_preview') or ''}")
 
     for card in cards[-14:]:
         tone = "act"
@@ -1116,7 +1299,7 @@ def _planner_headline(planner: dict) -> str:
 def _executors_headline(executors: dict) -> str:
     pending = int(executors.get("pending") or 0)
     if pending:
-        return f"{pending} holding"
+        return f"{pending} to send"
     live = int(executors.get("fired_live") or 0)
     sim = int(executors.get("fired_sim") or 0)
     if live or sim:
@@ -1155,7 +1338,7 @@ def load_board_state(now: datetime | None = None) -> dict:
         for item in orchestrator.read_pending_actions(path=pending_path())
         if item.is_waiting
     ]
-    pending.sort(key=lambda item: item["seconds_remaining"])
+    sort_pending_items(pending)
 
     meeting_id = _latest_meeting_id(cards, pending)
     header = read_meeting_header(meeting_id)
@@ -1166,6 +1349,8 @@ def load_board_state(now: datetime | None = None) -> dict:
         header["display_title"] = header["title"] or header["display_title"]
     totals = summarize_cards(cards)
     totals["pending"] = len(pending)
+    meeting_groups = build_meeting_groups(cards, pending)
+    totals["meetings"] = len(meeting_groups)
 
     pipeline = load_pipeline_status(totals, len(pending), cards=cards, pending=pending)
     # NEVER-BLANK OPEN. Only computed when there is nothing else to show, so a
@@ -1178,6 +1363,7 @@ def load_board_state(now: datetime | None = None) -> dict:
         "totals_line": build_totals_line(totals, last_adjourned),
         "cards": cards,
         "pending": pending,
+        "meeting_groups": meeting_groups,
         "mode_note": describe_mode_note(totals, last_adjourned),
         "pipeline": pipeline,
         "last_adjourned": last_adjourned,
@@ -1365,6 +1551,9 @@ def build_totals_line(totals: dict, last_adjourned: dict | None = None) -> str:
             return f"Nothing yet this session · {receipts} {noun} from the last meeting"
     noun = "action" if fired == 1 else "actions"
     parts = [f"{fired} {noun}", f"{totals.get('live', 0)} live", f"{totals.get('sim', 0)} sim"]
+    meetings = int(totals.get("meetings") or 0)
+    if meetings > 1:
+        parts.insert(0, f"{meetings} meetings")
     if totals.get("failed"):
         parts.append(f"{totals['failed']} failed")
     if totals.get("undone"):
@@ -1672,7 +1861,7 @@ def load_meeting_view(meeting_id: str, now: datetime | None = None) -> dict:
         for item in orchestrator.read_pending_actions(path=pending_path())
         if item.is_waiting and (item.meeting_id or "") == meeting_id
     ]
-    pending.sort(key=lambda item: item["seconds_remaining"])
+    sort_pending_items(pending)
 
     totals = summarize_cards(cards)
     totals["pending"] = len(pending)
@@ -1938,10 +2127,10 @@ def describe_connections(*, cloud_wait_seconds: float = 1.0) -> dict:
 
 
 def perform_undo(card_id: str) -> dict:
-    """Cancel a countdown, or reverse a fired action. The board's only write.
+    """Cancel a draft or countdown, or reverse a fired action.
 
-    Order matters: a waiting countdown is CANCELLED (nothing was sent, so there
-    is nothing to reverse), and only a fired action goes to the executor's undo.
+    Order matters: a waiting entry is CANCELLED (nothing was sent, so there is
+    nothing to reverse), and only a fired action goes to the executor's undo.
     """
     card_id = (card_id or "").strip()
     if not card_id:
@@ -1981,6 +2170,25 @@ def perform_undo(card_id: str) -> dict:
         "action": "undone" if undo_ok else "refused",
         "message": note,
     }
+
+
+def perform_send(card_id: str, edits: dict | None = None) -> dict:
+    """Send a Ready-to-send Slack or email draft. The board's other write."""
+    card_id = (card_id or "").strip()
+    if not card_id:
+        return {"ok": False, "action": "refused", "message": "no card id"}
+    result = orchestrator.send_held_action(
+        card_id, edits=edits or {}, path=pending_path()
+    )
+    if result is None:
+        return {
+            "ok": False,
+            "action": "refused",
+            "message": "nothing waiting to send",
+        }
+    if result.ok:
+        return {"ok": True, "action": "sent", "message": result.human_summary}
+    return {"ok": False, "action": "failed", "message": result.human_summary}
 
 
 def unwind_remaining_generations(record: dict, dedup_key: str, note: str) -> tuple[bool, str]:
@@ -2315,16 +2523,17 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
             return jsonify({"version": version, "unchanged": True})
 
         render_header = get_template_attribute("board.html", "board_header")
-        render_pending = get_template_attribute("board.html", "pending_column")
-        render_cards = get_template_attribute("board.html", "card_column")
+        render_followthrough = get_template_attribute("board.html", "followthrough_column")
         render_guts = get_template_attribute("board.html", "guts_panel")
         return jsonify(
             {
                 "version": version,
                 "unchanged": False,
                 "header_html": render_header(state),
-                "pending_html": render_pending(state["pending"]),
-                "cards_html": render_cards(state["cards"], state.get("last_adjourned")),
+                "pending_html": "",
+                "cards_html": render_followthrough(
+                    state.get("meeting_groups") or [], state.get("last_adjourned")
+                ),
                 "guts_html": render_guts(state.get("pipeline") or {}),
                 "totals_line": state["totals_line"],
                 "card_count": len(state["cards"]),
@@ -2365,6 +2574,19 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
             return jsonify({"ok": False, "action": "refused", "message": refusal}), 403
         payload = request.get_json(silent=True) or {}
         outcome = perform_undo(str(payload.get("dedup_key") or payload.get("card_id") or ""))
+        return jsonify(outcome), (200 if outcome["ok"] else 409)
+
+    @app.post("/send/<path:card_id>")
+    def send_card(card_id: str):
+        authorized, refusal = undo_request_is_authorized(app)
+        if not authorized:
+            return jsonify({"ok": False, "action": "refused", "message": refusal}), 403
+        payload = request.get_json(silent=True) or {}
+        edits = {
+            "text": payload.get("text"),
+            "subject": payload.get("subject"),
+        }
+        outcome = perform_send(card_id, edits)
         return jsonify(outcome), (200 if outcome["ok"] else 409)
 
     @app.get("/healthz")
@@ -2558,24 +2780,35 @@ def write_demo_data(directory: Path) -> tuple[Path, Path]:
     countdown = orchestrator.PendingAction(
         dedup_key="email_send:priya-example-com:benchmark-numbers",
         kind="email_send",
-        fire_at=(now + timedelta(seconds=48)).isoformat(timespec="seconds"),
-        regret_window_s=60,
-        human_preview="To priya@example.com — 'Benchmark numbers before Thursday'",
+        fire_at="",
+        regret_window_s=0,
+        hold_for_send=True,
+        human_preview="Email Priya: Benchmark numbers before Thursday",
         quote="I'll send Priya the benchmark numbers before Thursday.",
         speaker="Sharique",
         meeting_id=meeting_id,
-        payload={"to": "priya@example.com", "subject": "Benchmark numbers before Thursday"},
+        payload={
+            "to": ["priya@example.com"],
+            "person": "Priya",
+            "subject": "Benchmark numbers before Thursday",
+            "body_text": "Benchmark numbers before Thursday.",
+            "human_preview": "Email Priya: Benchmark numbers before Thursday",
+        },
     )
     second = orchestrator.PendingAction(
         dedup_key="slack_send:dana:thursday-review",
         kind="slack_send",
-        fire_at=(now + timedelta(seconds=25)).isoformat(timespec="seconds"),
-        regret_window_s=60,
-        human_preview="DM to @dana — 'Thursday 14:00 works for the review'",
+        fire_at="",
+        regret_window_s=0,
+        hold_for_send=True,
+        human_preview="Slack: Thursday 14:00 works for the review",
         quote="Tell Dana Thursday at two works.",
         speaker="Priya",
         meeting_id=meeting_id,
-        payload={"channel": "@dana"},
+        payload={
+            "text": "Thursday 14:00 works for the review.",
+            "human_preview": "Slack: Thursday 14:00 works for the review",
+        },
     )
     orchestrator.write_pending_actions(
         [countdown, second],

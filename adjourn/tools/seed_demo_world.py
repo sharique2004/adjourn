@@ -74,8 +74,8 @@ BEAT_GROUND_TRUTH = FIXTURES_DIR / "pr-review-beat.fixtures.json"
 # The demo meeting, which now carries the same beat — one bare `--replay` has to
 # show the inline suggestion alongside every other kind, so the number lives here
 # too and this script keeps both copies honest.
-DEMO_TRANSCRIPT = FIXTURES_DIR / "agi-living-room.jsonl"
-DEMO_GROUND_TRUTH = FIXTURES_DIR / "agi-living-room.fixtures.json"
+DEMO_TRANSCRIPT = FIXTURES_DIR / "living-room-standup.jsonl"
+DEMO_GROUND_TRUTH = FIXTURES_DIR / "living-room-standup.fixtures.json"
 PROP_DOC = FIXTURES_DIR / "PR_REVIEW_PROP.md"
 
 # --- the roadmap ------------------------------------------------------------
@@ -428,7 +428,7 @@ def _statement_span(document: str, segment_id: str) -> tuple[int, int]:
 
     NEEDED BECAUSE THE BEAT NOW LIVES IN TWO FIXTURES. pr-review-beat.fixtures
     .json holds exactly one statement, so a whole-file rewrite of every
-    `"issue_number": N` was safe there. agi-living-room.fixtures.json holds
+    `"issue_number": N` was safe there. living-room-standup.fixtures.json holds
     twelve, and one of them is the Redis decision on issue #2 — a whole-file
     rewrite would renumber THAT to the pull request and point the demo's opening
     comment at a PR. So the rewrite is scoped to the one object.
@@ -471,11 +471,11 @@ def _statement_span(document: str, segment_id: str) -> tuple[int, int]:
 #
 # `scope` says how much of the ground-truth file the number rewrite may touch:
 #   "file"      — the file is about this beat and nothing else (pr-review-beat)
-#   "statement" — rewrite only the one statement object (agi-living-room, whose
+#   "statement" — rewrite only the one statement object (living-room-standup, whose
 #                 other statements carry real issue numbers of their own)
 BEAT_FIXTURES: tuple[tuple[Path, str, Path, str, str], ...] = (
     (BEAT_TRANSCRIPT, "prb-s05", BEAT_GROUND_TRUTH, "prb-s05", "file"),
-    (DEMO_TRANSCRIPT, "agi-s32", DEMO_GROUND_TRUTH, "agi-s32", "statement"),
+    (DEMO_TRANSCRIPT, "lr-s32", DEMO_GROUND_TRUTH, "lr-s32", "statement"),
 )
 
 

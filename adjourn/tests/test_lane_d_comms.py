@@ -56,6 +56,7 @@ def make_action(kind: str, payload: dict, dedup_key: str, **extra) -> Action:
         payload=payload,
         dedup_key=dedup_key,
         regret_window_s=extra.pop("regret_window_s", 0),
+        hold_for_send=extra.pop("hold_for_send", False),
         quote=extra.pop("quote", "I'll take care of that today."),
         speaker=extra.pop("speaker", "Priya"),
         meeting_id=extra.pop("meeting_id", "lane-d-test"),
@@ -303,11 +304,11 @@ check("undo of a live send with no ts refuses",
 
 # =============================================================================
 print("\n== email: the address book ==")
-os.environ["ADJOURN_ADDRESS_BOOK"] = "Div=div@example.com; Priya Nair=priya@example.com\nbroken"
+os.environ["ADJOURN_ADDRESS_BOOK"] = "Alex=alex@example.com; Priya Nair=priya@example.com\nbroken"
 book = email_send_executor.read_address_book()
 check("book parses two entries", len(book) == 2, str(book))
-check("lookup by first name", email_send_executor.look_up_address("Div") == "div@example.com")
-check("lookup is case-insensitive", email_send_executor.look_up_address("DIV") == "div@example.com")
+check("lookup by first name", email_send_executor.look_up_address("Alex") == "alex@example.com")
+check("lookup is case-insensitive", email_send_executor.look_up_address("ALEX") == "alex@example.com")
 check("lookup by full name",
       email_send_executor.look_up_address("Priya Nair") == "priya@example.com")
 check("lookup by first name of a full-name entry",
@@ -318,22 +319,22 @@ check("a malformed entry is skipped, not raised", "broken" not in book)
 
 email_action = make_action(
     "email_send",
-    {"person": "Div", "subject": "Cache layer timeline",
+    {"person": "Alex", "subject": "Cache layer timeline",
      "body_text": "Here's the timeline we agreed on.",
-     "human_preview": "Email Div: cache layer timeline"},
-    "email_send:div:cache-layer-timeline",
+     "human_preview": "Email Alex: cache layer timeline"},
+    "email_send:alex:cache-layer-timeline",
     regret_window_s=60,
-    quote="I'll email Div the timeline tonight.",
+    quote="I'll email Alex the timeline tonight.",
 )
 addresses, unresolved = email_send_executor.resolve_recipients(email_action)
-check("a name resolves through the book", addresses == ["div@example.com"], str(addresses))
+check("a name resolves through the book", addresses == ["alex@example.com"], str(addresses))
 check("nothing is left unresolved", unresolved == [])
 
 explicit_action = make_action(
-    "email_send", {"to": ["someone@example.com", "Div"]}, "email_send:explicit")
+    "email_send", {"to": ["someone@example.com", "Alex"]}, "email_send:explicit")
 addresses, unresolved = email_send_executor.resolve_recipients(explicit_action)
 check("explicit addresses and book names combine",
-      addresses == ["someone@example.com", "div@example.com"], str(addresses))
+      addresses == ["someone@example.com", "alex@example.com"], str(addresses))
 
 unknown_action = make_action("email_send", {"person": "Mallory"}, "email_send:mallory")
 addresses, unresolved = email_send_executor.resolve_recipients(unknown_action)
@@ -342,12 +343,12 @@ check("an unknown person is reported by name", unresolved == ["Mallory"], str(un
 
 print("\n== email: message construction ==")
 message = email_send_executor.build_email_message(email_action, "sharique@example.com")
-check("To is the resolved address", message["To"] == "div@example.com")
+check("To is the resolved address", message["To"] == "alex@example.com")
 check("Subject comes from the payload", message["Subject"] == "Cache layer timeline")
 check("a Message-ID exists before sending", bool(message["Message-ID"]))
 preview = email_send_executor.render_email_preview(message)
 check("the body carries the verbatim quote",
-      "I'll email Div the timeline tonight." in preview["body"])
+      "I'll email Alex the timeline tonight." in preview["body"])
 check("the body carries the written message", "timeline we agreed on" in preview["body"])
 check("the preview is full RFC822", preview["rfc822"].startswith("From: sharique@example.com"))
 check("the preview names the transport", "smtp.gmail.com:587" in preview["transport"])
@@ -514,6 +515,77 @@ check("a rebuilt action keeps its kind and key",
 check("a rebuilt action keeps its provenance",
       rebuilt.quote and rebuilt.speaker == "Priya" and rebuilt.meeting_id == "lane-d-test")
 check("a rebuilt action keeps its payload", rebuilt.payload["channel"] == "#eng")
+
+
+print("\n== hold for send: Slack and email wait, they do not auto-fire ==")
+with tempfile.TemporaryDirectory() as directory:
+    journal = Path(directory) / "executions.jsonl"
+    pending = Path(directory) / "pending.json"
+    recaps = Path(directory) / "recaps"
+    recaps.mkdir()
+    original_journal = config.executions_journal_path
+    original_pending = config.pending_actions_path
+    original_recaps = config.recaps_directory
+    config.executions_journal_path = lambda: journal  # noqa: E731
+    config.pending_actions_path = lambda: pending  # noqa: E731
+    config.recaps_directory = lambda: recaps  # noqa: E731
+    try:
+        held = make_action(
+            "slack_send",
+            {"text": "Cache cutover is Friday.",
+             "human_preview": "Slack: Cache cutover is Friday."},
+            "slack_send:eng:cutover-hold",
+            hold_for_send=True,
+        )
+        queued = orchestrator.fire_action(held, meeting_title="Eng sync")
+        check("a hold returns None instead of a result", queued is None)
+        waiting = orchestrator.read_pending_actions()
+        check("it landed in pending.json",
+              len(waiting) == 1 and waiting[0].hold_for_send)
+        check("a hold is never due", orchestrator.due_pending_actions() == [])
+        waiting[0].fire_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(
+            timespec="seconds"
+        )
+        orchestrator.write_pending_actions(waiting)
+        check("rewinding fire_at still does not auto-fire a hold",
+              orchestrator.tick_pending_actions() == [])
+        check("nothing was journaled while it waited",
+              results.read_executions(path=journal) == [])
+
+        sent = orchestrator.send_held_action(
+            "slack_send:eng:cutover-hold",
+            edits={"text": "Cache cutover moved to Monday."},
+        )
+        check("Send fires the hold", sent is not None and sent.ok)
+        check("the edited body is what went out",
+              sent is not None
+              and "Cache cutover moved to Monday." in sent.human_summary)
+        check("the hold is no longer waiting",
+              all(not item.is_waiting for item in orchestrator.read_pending_actions()))
+        check("the send was journaled",
+              "slack_send:eng:cutover-hold" in results.read_fired_dedup_keys(path=journal))
+        check("a second Send refuses",
+              orchestrator.send_held_action("slack_send:eng:cutover-hold") is None)
+
+        email_hold = make_action(
+            "email_send",
+            {"to": ["alex@example.com"], "person": "Alex",
+             "subject": "Deck", "body_text": "Here is the deck."},
+            "email_send:alex:deck-hold",
+            hold_for_send=True,
+        )
+        orchestrator.fire_action(email_hold, meeting_title="Eng sync")
+        emailed = orchestrator.send_held_action(
+            "email_send:alex:deck-hold",
+            edits={"subject": "Demo deck", "text": "The demo deck is attached."},
+        )
+        check("an edited email fires", emailed is not None and emailed.ok)
+        check("the email kept the edited subject",
+              emailed is not None and "Demo deck" in emailed.human_summary)
+    finally:
+        config.executions_journal_path = original_journal
+        config.pending_actions_path = original_pending
+        config.recaps_directory = original_recaps
 
 
 # =============================================================================

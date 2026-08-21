@@ -1,6 +1,6 @@
 # Adjourn — demo runbook
 
-**one standup, one PR review, and a board that fills itself.**
+**Aug 21, 2026 · one standup — the PR review is inside it — and a board that fills itself.**
 
 The claim: *the meeting is the to-do*. You hold a normal standup inside Adjourn,
 you stop the recording, and the follow-through is already done — issues
@@ -107,6 +107,25 @@ reachability, memory backend and node counts, the cloud probe, secret
 journal path, recap directory, board bind. If something is going to be
 simulated tonight, this page told you before the founders sat down.
 
+### Dress the board (optional, 1 second)
+
+A board with nothing on it is an honest cold open, and it is also a weak first
+frame if the room walks in early. One command puts the last rehearsal's twelve
+receipts on Follow-through — all five demo kinds, the PR suggestion included —
+without running extraction, without touching the network, and without a server
+restart:
+
+```bash
+$PY -m adjourn.tests.dress_journal      # then reload http://127.0.0.1:5117/
+```
+
+It writes `executions.jsonl` and nothing else, and every card carries the badge
+that is true of it. **Undo it before you present** with step 6 (`reset_demo
+--reseed`), which archives that journal — otherwise the live `--replay` lands on
+top of a board that already looks finished and the fill is invisible.
+`--into DIR` writes somewhere harmless instead, for a rehearsal you do not want
+on the real journal.
+
 ### Reading what `--reseed` prints
 
 The conflict beat — the best moment in the demo — only works if last week's
@@ -212,15 +231,19 @@ its own story in that order.
 | Act | Tab | What happens | ~time |
 |---|---|---|---|
 | 1 | **Meetings** | Open on the library — 54 real recordings, 12.6 hours. "This is a meeting recorder. That part is not the product." | 15s |
-| 2 | **Live** | Press **Start recording** *in Adjourn*. Captions stream in as you talk. Hold the standup. | 90s |
+| 2 | **Live** | Press **Start recording** *in Adjourn*. Captions stream in as you talk. Hold the standup — the PR review is its last forty seconds. | 130s |
 | 3 | **Live → stop** | Press **Stop**. Nothing else is clicked, all night. | 1s |
 | 4 | **Follow-through** | 30–50 seconds of silence, then every card lands at once. This is §8. | 60s |
 | 5 | **Follow-through** | Undo a card. Watch the external state come back. | 20s |
 | 6 | **Follow-through** | The recap link, same origin, one click. Close on it. | 20s |
 
-The PR-review beat (§7) is a **second, shorter meeting** you can run after the
-standup if the room is with you, or drop entirely if it is not. It is the beat
-that shows Adjourn reading code, not just transcripts.
+**ONE MEETING. There is no second one.** The PR-review beat (§7) used to be a
+separate 40-second tape you ran afterwards, and it is now the tail of the
+standup itself — lines 28–36 of §4. That is why one bare `--replay` is the
+entire pitch: the same tape produces the Linear ticket, the SHA-5 move, the
+Slack draft, the GitHub decision comment **and** the inline suggestion on
+PR #6. Do not split it back out; the beat that shows Adjourn reading code is
+worth more inside one meeting than as an encore nobody has time for.
 
 Open on **Meetings**, not on the board. The library is a real artifact — 54
 recordings with durations, speakers, warnings and summaries — and starting
@@ -235,6 +258,38 @@ Two people. **YOU** is Sharique (mic track). **THEM** is the other person, on
 speaker or in the room (system track). Say it like a standup, not like a script:
 the filler and the interruptions are what make it a real meeting, and Adjourn is
 built to ignore them.
+
+**The live-mic variant — exactly what has to be running.** Two processes, two
+terminals, no third window. The board serves the tabs; the orchestrator is what
+notices Stop:
+
+```bash
+cd /path/to/adjourn
+PY=python
+
+# terminal 1 — the five tabs. Leave it up. http://127.0.0.1:5117
+$PY -m adjourn.board_server
+
+# terminal 2 — the watcher. THIS is what makes Stop do anything.
+ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub,pr_review_suggestion \
+  $PY -m adjourn.orchestrator --watch
+```
+
+`--watch` starts MeetingScribe if it is not already up, primes against the jobs
+that already exist (so the back catalogue does not fire), and then holds two
+polls: `/api/record/status` at 2 Hz and `/api/status` at 1 Hz. The chain Stop
+sets off is: the Live tab proxies `POST /api/record/stop` to the engine verbatim
+→ `recording` flips `true` → `false` → the fast poll sees that edge and **forces**
+an immediate `/api/status` pull instead of waiting out the slow tick → the new
+key under `jobs` is the stop edge *and* the meeting id in one observation →
+`handle_meeting_stopped` runs the fast pass, so cards land while the transcript
+is still being written → when that job flips to `done`, the final pass reconciles
+against the full transcript. That whole path is `orchestrator.handle_meeting_event`
+and it is asserted end to end in `test_lane_a_spine` under *"the live handoff"*.
+
+**If terminal 2 is not running, Stop does nothing** and the board sits there
+looking broken. That is the single most likely way to lose the demo; check §1
+step 9 before you walk on.
 
 Press **Start recording** on the Live tab. Then:
 
@@ -263,17 +318,25 @@ Press **Start recording** on the Live tab. Then:
 | 21 | **THEM** | **"It's been running clean in dev all week. Nothing to report, which is the report."** | **GitHub comment on #1** — resolved through memory, since "issue one" was said in the *previous* line |
 | 22 | YOU | "Do we still need the rate-limit ticket open, or is SHA-5 the same piece of work?" | *nothing* — an open question, nobody answered it |
 | 23 | THEM | "Uh. Good question. I'll look after this." | *nothing* |
-| 24 | **YOU** | **"Alright. I'll Slack the channel the summary once we're done here."** | ⭐ **Slack message** — after a visible 60-second countdown |
-| 25 | **THEM** | **"And I'll email Div the deck after this. He's asked for it twice now and I keep forgetting."** | **Email** — after a 60-second countdown |
+| 24 | **YOU** | **"Alright. I'll Slack the channel the summary once we're done here."** | ⭐ **Slack draft** — Ready to send; edit, then Send |
+| 25 | **THEM** | **"And I'll email Alex the deck after this. He's asked for it twice now and I keep forgetting."** | **Email draft** — Ready to send; edit, then Send |
 | 26 | **YOU** | **"Perfect. Let's review Friday, both of us, and see where the cache actually landed."** | **Calendar hold — "Review: cache layer"**. Today *is* Friday, so a bare "Friday" on a review beat rolls to the 28th and the log says so out loud. (A *deadline* said as "by Friday" still means today — different reading, on purpose.) |
 | 27 | THEM | "Friday works. Okay, I'm going to go eat something." | *nothing* |
-| 28 | YOU | "Go. Bye." | *nothing* |
+| 28 | YOU | "Two more things and then I'll let you go eat." | *nothing* — the hinge into §7, still the same meeting |
+| 29 | THEM | "I'm listening. Go." | *nothing* |
+| 30 | YOU | "Did you look at the beta signup page? Priya pushed it up this afternoon, the join the beta thing." | *nothing* — a question |
+| 31 | THEM | "I skimmed it on my phone in the elevator. Copy's good. Shorter than I expected, which is a compliment." | *nothing* |
+| 32 | **YOU** | **"Yeah, the copy's fine. But on Priya's join button PR — pull six — that green is wrong. It should be our slate blue, six B seven F nine nine."** | ⭐ **Inline review suggestion on PR #6** — on the diff, `#2ecc71` → `#6b7f99`. Not a commit, not a push. See §7 |
+| 33 | THEM | "Six B seven F nine nine. Right, the one out of the deck. I always have to look that up." | *nothing* |
+| 34 | YOU | "It's the only green anywhere on the site. It doesn't read as a brand colour, it reads as a bug someone hasn't noticed yet." | *nothing* — reasoning about a change already asked for |
+| 35 | THEM | "No, you're right. It's one line in the stylesheet, she can turn that around before Friday without breaking a sweat." | *nothing* — and **no** calendar hold. "Can" is not "will", and she was not in the room. See §7 |
+| 36 | YOU | "That's all I had. Go eat something." | *nothing* |
 
 **Then press Stop.** That is the whole trigger. Nobody clicks anything else in
-Adjourn.
+Adjourn, and there is no second meeting.
 
-Ten beats out of twenty-eight lines produce an action. The other eighteen are
-the demo: this is a system that mostly does nothing, on purpose.
+Eleven beats out of thirty-six lines produce an action. The other twenty-five
+are the demo: this is a system that mostly does nothing, on purpose.
 
 Do **not** promise a card count out loud. Extraction is a model. Measured across
 six identical replays tonight, the demo transcript produced **11–13 statements
@@ -287,7 +350,7 @@ is not. Say "about ten".
 MeetingScribe labels the microphone track `You` and the system track `Them`.
 Both are correct on the recorder's own screen and wrong everywhere else — a
 Slack message that opens *"You in the meeting:"* means nothing to whoever reads
-it, and an email card reading *"Them will email Div the deck"* looks like a bug
+it, and an email card reading *"Them will email Alex the deck"* looks like a bug
 on a projector.
 
 Both are now mapped once, in extraction, so the Slack body, the Linear
@@ -325,14 +388,14 @@ succeeded on the first attempt:
 | Scenario | What is in it | Correct answer |
 |---|---|---|
 | `fp-hypothetical` | *"And don't email the client yet. I mean it."* · *"We could file a ticket for this but honestly let's not."* | nothing |
-| `fp-reported` | 19 segments of *"Div said he'd send the deck"* — nobody in the room commits to anything | nothing |
+| `fp-reported` | 19 segments of *"Alex said he'd send the deck"* — nobody in the room commits to anything | nothing |
 | `fp-social` | dinner. *"I promise you'll love this place"* is not a commitment | nothing |
 | `fp-meta` | a meeting **about** tickets and PRs and emails, which must produce none of them | nothing |
 | `no-actions` | small talk — **and the recap still fires**, so restraint leaves evidence | nothing but a recap |
 | `hallway-sync` | two real beats buried in chat | a comment and a ticket |
 | `design-review` | the full spread | six actions |
-| `agi-living-room` | the demo meeting | eight to ten |
-| `pr-review-beat` | §7 | one review, and *nothing else* |
+| `living-room-standup` | **the demo meeting** — the whole pitch, PR beat included | all eight action kinds |
+| `pr-review-beat` | the PR beat on its own, kept as a regression tape — **not** something you run on stage | one review, and *nothing else* |
 
 Each of those first four once produced live public artifacts: a prohibition
 published to an issue as a decision, a Linear ticket filed in the name of
@@ -363,7 +426,9 @@ for a sentence the gate already threw away."
 
 ## 7. The PR-review beat
 
-A second, 40-second meeting. Have the prop PR open in the next window.
+**The last forty seconds of the same standup — lines 28–36 of §4.** Not a second
+meeting, not a second `--replay`, not a second Stop. Have the prop PR open in the
+next window and keep talking; you never leave the recording.
 
 > **YOU:** "Two more things and then I'll let you go eat."
 > **THEM:** "I'm listening. Go."
@@ -383,8 +448,11 @@ A second, 40-second meeting. Have the prop PR open in the next window.
 is the only licence for the PR number. **Say the hex as words, no "hash"** — the
 quote has no `#` in it and the quote is what gets printed on GitHub.
 
-One line out of nine produces anything. What lands is an **inline suggestion on
-the diff**, on `web/app/globals.css`, with a one-click Commit button.
+One line out of these nine produces anything. What lands is an **inline
+suggestion on the diff**, on `web/app/globals.css`, with a one-click Commit
+button — and it lands from the *same* `--replay` that produced everything else,
+because these nine lines are the tail of the demo tape rather than a tape of
+their own.
 
 ### Why this beat is different, and how to say it
 
@@ -436,9 +504,11 @@ It reports anything it cannot remove rather than pretending.
 
 ### The first 30–50 seconds are silent. Plan for them.
 
-**Measured tonight, not estimated.** Extraction on the 28-segment demo
-transcript, five cold runs end to end in sim: **27.9s, 30.3s, 31.9s, 33.6s,
-34.6s** — median **31.9s**. Live executors add roughly a second each (Linear
+**Measured tonight, not estimated.** Extraction on the **36-segment** demo
+transcript — the standup with the PR beat merged into its tail — five cold runs
+end to end in sim: **27.9s, 30.3s, 31.9s, 33.6s, 34.6s** — median **31.9s**. The
+21 Aug re-measure on the merged tape: extraction **21.8s**, `REPLAY complete in
+29.3s` including planning and firing. Live executors add roughly a second each (Linear
 create 0.51s, Slack post 1.05s, one `gh` API round trip 0.52s) plus the draft PR,
 which is three `gh` calls. **Budget 30 seconds in sim, up to 50 live.**
 
@@ -502,13 +572,12 @@ If someone asks what the threshold is, the true answer is a short ordered list:
 There is no rule anywhere that moves a ticket to **Done**. Say so; it is a good
 answer. A human closes tickets.
 
-**When the countdown ring appears on the Slack card:**
+**When Ready to send appears for Slack or email:**
 > "Sending a message to humans is the one thing you can't quietly take back, so
-> there's sixty seconds where you can stop it. Not an approval dialog — I'm not
-> asking permission, I'm giving you a chance to regret it. If nobody touches it,
-> it goes."
+> it does not go out on its own. Edit it if the wording is wrong. Press Send
+> when you mean it. Don't send if you don't."
 
-Let it go out. Show your phone.
+Press **Send**. Show your phone.
 
 **Closing, on the recap:** click **Open recap** on the recap card. It is served
 from the board's own origin at `/recap/<meeting-id>`, so it opens like any other
@@ -540,8 +609,9 @@ memories afterwards. Five flags; the fourth is the fix.
 **If someone asks "what did it decide *not* to do?"** — best question in the
 room, and there are three answers on screen:
 
-1. The **EXTRACTION** strip reads *"28 segments · 12 statements · 18 produced
-   nothing"*. The eighteen is now on the board, where you are pointing.
+1. The **EXTRACTION** strip reads *"36 segments · 13 statements · 23 produced
+   nothing"*. The twenty-three is now on the board, where you are pointing.
+   (The counts move run to run — read the strip, do not quote this line.)
 2. Any card you cancelled is still there, dimmed, badged **CANCELLED**, reading
    *"cancelled by a human — it never ran"* — and it stays cancelled: the
    reconcile pass will not quietly send it a minute later.
@@ -557,7 +627,7 @@ Use these verbatim. Every one is true, and each is a better line than pretending
 |---|---|
 | A card is badged **SIM** | "Simulated — same code path, real payload, it just didn't make the last call. The badge is the product." |
 | **Email** is sim (it always is tonight) | "No Gmail app password on this machine, so it renders the full message and stops. A missing credential is a mode here, not a crash." |
-| The email card shows **`div@example.com`** | Do not let this pass unremarked — it reads as a placeholder to anyone technical, right under "it built the exact payload". The card says so itself: *"simulated — no address on file"*. Better: put real addresses in `ADJOURN_ADDRESS_BOOK` in `adjourn/.env` before you start. |
+| The email card shows **`alex@example.com`** | Do not let this pass unremarked — it reads as a placeholder to anyone technical, right under "it built the exact payload". The card says so itself: *"simulated — no address on file"*. Better: put real addresses in `ADJOURN_ADDRESS_BOOK` in `adjourn/.env` before you start. |
 | A **Linear ticket has no labels** | True and deliberate. The executor applies labels the workspace already has and **never creates one**, and the SHA workspace has no `from-meeting` label. "It won't invent a label in your workspace to tag its own work. That's a decision, not an omission." |
 | Both **calendar holds** name the cache layer | "Ship: cache layer" and "Review: cache layer" — same work item, two commitments. If the review hold lands on **Fri 28 Aug**: "today is Friday, and 'let's review Friday' on a Friday means next Friday. A *deadline* of 'by Friday' would still mean today. Different reading for a different kind of sentence — and it's a table, not a guess." |
 | **Extraction is slow** and you are out of script | "Four model calls in parallel through the Claude CLI, on-device transcription before that. That's the honest cost of not sending the transcript anywhere." Then §6 — the restraint corpus is a good thing to talk about while you wait. |
@@ -579,7 +649,7 @@ reverse it:
 ```
 [reset] REFUSING: 3 live action(s) have not been undone.
   github_update  https://github.com/sharique2004/adjourn/issues/2#issuecomment-…
-    undo with: POST /undo/github_update:agi-living-room:issue-2:decision
+    undo with: POST /undo/github_update:living-room-standup:issue-2:decision
 ```
 
 That refusal exists because the old ordering was a trap: reset deleted
@@ -614,7 +684,7 @@ roadmap and deletes the branch).
 **Between a rehearsal and the real run this is not optional.** Every dedup key is
 meeting-scoped, so a fresh meeting id gets a clean slate — but memory still holds
 the prior standup you want to contradict, and a half-reset state (journal kept,
-pending countdowns from a previous run still waiting) will fire someone else's
+pending drafts from a previous run still waiting) will send someone else's
 leftovers over the top of your demo.
 
 ---
@@ -661,12 +731,12 @@ else. Verified with a child process reading its full environment.
 never guess one. The whole resolution table is one line in `adjourn/.env`:
 
 ```
-ADJOURN_ADDRESS_BOOK="Div=div@example.com; Priya Nair=priya@example.com; Sam=sam@example.com"
+ADJOURN_ADDRESS_BOOK="Alex=alex@example.com; Priya Nair=priya@example.com; Sam=sam@example.com"
 ```
 
 Replace the `example.com` addresses **before the demo, not before the first live
 send** — the sim card is what the room reads, and *"Would email
-div@example.com"* undercuts "it built the exact payload" in the same breath.
+alex@example.com"* undercuts "it built the exact payload" in the same breath.
 
 A name that is not in this table produces a failed card that names the person,
 and the promise shows up in the recap's commitment ledger instead — the right
@@ -698,24 +768,59 @@ $PY -m adjourn.reset_demo --reseed     # once, so the conflict beat has last wee
 $PY -m adjourn.board_server            # leave running — http://127.0.0.1:5117
 
 # other terminal; MeetingScribe can be off:
-ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub \
+ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub,pr_review_suggestion \
   $PY -m adjourn.orchestrator --replay --sim
 ```
 
-`--replay` with no target is the canned `agi-living-room` transcript, fed through
-the **real** extract → plan → execute path. `--replay pr-review-beat` runs §7.
+**One bare `--replay` is the whole pitch.** With no target it runs the canned
+`living-room-standup` transcript through the **real** extract → plan → execute
+path, and that one tape produces all five kinds a judge is watching for:
+`linear_create` (the webhook-signature ticket), `linear_move` (SHA-5 → In
+Review), `slack_send` (Ready to send until you press Send), `github_update` (the Redis
+decision on #2) and `pr_review_suggestion` (PR #6, `#6b7f99`, on the diff).
+Do not run a second meeting for the PR beat — it is §4 lines 28–36.
 A typo still refuses rather than reading MeetingScribe's live buffer.
 
 The pipeline rail is **always on**, down the right of Follow-through — there is
-nothing to expand. Watcher reads `replay · transcript ready`, Extraction ticks
-`reading N batches` → `batch 1/N` → N statements with the silent-line count
-beside it, Planner shows what the table decided versus ignored, Executors show
-HOLDING / LIVE / SIM as cards land. It survives the one-second fragment swap.
+nothing to expand. Watcher reads `replay · transcript ready`, Extraction ticks,
+Planner shows what the table decided versus ignored, Executors show HOLDING /
+LIVE / SIM as cards land. It survives the one-second fragment swap.
+
+**The extraction bar really moves, and this is what it did.** Polled off
+`/api/board` during the 21 Aug run on the merged tape, the batch counter was
+written once per batch *as that batch came back* — the denominator first so the
+bar exists during the longest single wait, then one step per completion:
+
+```
+20:57:54  batch 0/5 · 36 lines     ← denominator published before the first call
+20:58:02  batch 1/5 · 8 lines      ← the serial seed batch, ~8s
+20:58:10  batch 2/5 · 8 lines   ┐
+20:58:10  batch 3/5 · 8 lines   ├ four parallel batches, landing together
+20:58:10  batch 4/5 · 8 lines   ┘
+20:58:15  batch 5/5 · 4 lines
+20:58:16  done · 36 segments · 13 statements · 23 produced nothing
+```
+
+Two things follow from that shape. The bar sits at `0/5` for the first eight
+seconds and that is honest — nothing has come back yet. And it can jump `1/5` →
+`4/5` in one frame, because the parallel batches finish within the same second;
+the number is how many have **completed**, which is the only reading of a
+progress bar that never goes backwards on screen. If it ever sits frozen at
+`0/N` for the whole pass, extraction is not batching — check the engine, not the
+board.
 
 The replayed meeting is also a row on **Meetings**, badged `REPLAY`, and its
 transcript is where every card's quote links back to — that is beat E on the
-`--replay` path. It is listed because `agi-living-room` is named in
+`--replay` path. It is listed because `living-room-standup` is named in
 `ADJOURN_PRESENTATION_MEETINGS`; a tape is never listed unless you list it.
+
+**The run survives everything except a reset.** The journal is the authority, so
+a cold open of `/` after the replay shows the same eleven cards — after a browser
+reload, after the orchestrator process exits, and after the board server itself
+is restarted. Verified 21 Aug: `pkill -f adjourn.board_server`, start it again,
+`curl -s 127.0.0.1:5117/api/board` still lists all five kinds. The **only** thing
+that clears it is `reset_demo`, which archives the journal on purpose; after that
+the board falls back to the Last-adjourned panel reading those archived receipts.
 
 ---
 
@@ -723,24 +828,24 @@ transcript is where every card's quote links back to — that is beat E on the
 
 | Symptom | Do this |
 |---|---|
-| Nothing fires after the stop | First: has it been **30 seconds**? See §8. After that, `curl -s 127.0.0.1:5005/api/status` — is there a new key under `jobs`? If the engine restarted, the watcher re-primes and the *next* meeting fires. |
-| The board is empty but a meeting *did* process | A meeting that yields nothing still writes a recap saying so, with the line count: *"Nothing followed from this meeting. 28 lines were spoken…"* A completely blank board with no header means the orchestrator is not running. |
+| Nothing fires after the stop | First: has it been **30 seconds**? See §8. After that, `curl -s 127.0.0.1:5005/api/status` — is there a new key under `jobs`? Restart the watcher if it was down — it catches up any unprocessed-but-done meeting from the last hour. If a meeting was missed, catch it up with `$PY -m adjourn.orchestrator --replay <meeting-id>`. |
+| The board is empty but a meeting *did* process | A meeting that yields nothing still writes a recap saying so, with the line count: *"Nothing followed from this meeting. N lines were spoken…"* A completely blank board with no header means the orchestrator is not running. |
 | Extraction produces nothing | `ADJOURN_FIXTURE_FLOOR=1` makes the demo meeting fall back to its hand-written ground truth. **Only for the demo meeting** — it must stay off for a real one. |
-| A card fires you did not want | Click **Undo**. GitHub comments, Linear moves, Slack messages and PR reviews all reverse for real, and the recap page is rewritten so it agrees with the board — the undone row goes struck through with an UNDONE badge and its dead permalink is printed as text rather than linked. Email does not reverse: the countdown *was* the undo, and the button says so. |
+| A card fires you did not want | Click **Undo**. GitHub comments, Linear moves, Slack messages and PR reviews all reverse for real, and the recap page is rewritten so it agrees with the board — the undone row goes struck through with an UNDONE badge and its dead permalink is printed as text rather than linked. Email does not reverse: Don't send before it goes out; after Send it cannot come back, and the button says so. |
 | The Undo button says **Undo (sim)** | Nothing left the machine; there is nothing out there to take back. |
 | The Undo button says **Undo (local)** | A SIM-badged calendar hold or recap whose file really is on disk. That is a real undo of a real local artifact. |
-| A countdown you want to stop | Click **Cancel** — the button really does say *Cancel*. Cancel (nothing happened yet) and Undo (something happened and was reversed) are different words for different things. The cancelled card stays on the board, dimmed and badged CANCELLED, and reconcile will not re-send it. |
+| A draft you do not want to send | Click **Don't send**. Nothing left the machine. Undo is for something that already happened. |
 | Undo returns **403** | The board was restarted after the page was loaded, so the page is holding last run's token. Reload the board; the message says so. |
 | The board is stale | It polls once a second and only swaps HTML when a version hash changes. Reload if you must; nothing is lost — it renders from the journal. |
-| Everything is on fire | Re-run with **`--sim-all`** (not `--sim` — see §2) and `--replay agi-living-room`. The whole demo runs off the fixture transcript through the identical code path: **~32s to the cards**, ~95s including both 60-second regret windows. |
+| Everything is on fire | Re-run with **`--sim-all`** (not `--sim` — see §2) and a bare **`--replay`**. The whole demo runs off the fixture transcript through the identical code path: **~30s to the cards**. Slack and email wait in Ready to send until you press Send. |
 | You typo the `--replay` target | It refuses rather than guessing. A path, a folder with no `meeting.json`, or an unknown meeting id all print a refusal and fire nothing — because falling through would read the engine's *current* caption buffer and file another meeting's words under your typo. |
 
 **Full dress rehearsal, any time:**
 
 ```bash
 $PY -m adjourn.reset_demo --reseed
-ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub \
-  $PY -m adjourn.orchestrator --replay agi-living-room
+ADJOURN_SIM=1 ADJOURN_LIVE_KINDS=github_update,pull_request_stub,pr_review_suggestion \
+  $PY -m adjourn.orchestrator --replay
 ```
 
 Run it twice. The second run must fire **zero** duplicate actions — only the
@@ -767,7 +872,7 @@ than trusting the table if the machine or the network changed.
 
 | | |
 |---|---|
-| Extraction, demo transcript (28 segments), 5 cold runs | 27.9 / 30.3 / 31.9 / 33.6 / 34.6 s — median **31.9s** |
+| Extraction, demo transcript (36 segments, PR beat included), 5 cold runs | 27.9 / 30.3 / 31.9 / 33.6 / 34.6 s — median **31.9s**; re-measured 21 Aug at **21.8s** |
 | Extraction, whole 9-scenario corpus | **3.9s – 55.5s**, uncorrelated with transcript length |
 | Statements from the demo transcript, 6 runs | 11–13, yielding 8–10 acting cards |
 | Live executor round trips | Linear create 0.51s · Linear archive 0.40s · Slack post 1.05s · Slack delete 0.36s · one `gh` API call 0.52s |

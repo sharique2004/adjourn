@@ -31,6 +31,13 @@ WATCH_STATE_STALENESS_SECONDS is treated as untrustworthy and re-primed instead:
 after a long gap we would otherwise fire the whole back catalogue of meetings
 that happened while nothing was running.
 
+CATCH-UP. The journal, not watcher.json, is the authority for "did we process
+this?". A done job from the last hour that has no successful journal row is
+released on prime (and on the first poll if we started unprimed) so it fires
+STOPPED then READY. That is how a meeting that ended while the watcher was down
+still lands on Follow-through. Older unprocessed jobs stay quiet; catch those
+with `--replay <meeting-id>`.
+
 Run standalone to watch the edges scroll by:
     python -m adjourn.watcher
 """
@@ -39,6 +46,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -54,6 +63,15 @@ FAST_POLL_INTERVAL_SECONDS = 0.5
 # is long enough to survive a restart between demo takes and short enough that a
 # machine left off overnight does not wake up and fire yesterday's meetings.
 WATCH_STATE_STALENESS_SECONDS = 600.0
+
+# On prime, a done job the journal has never seen is caught up rather than
+# absorbed — but only inside this window. Wider than that is the back catalogue
+# (yesterday's standups, last month's interviews) and those stay quiet; the
+# operator catches a specific one with `--replay <meeting-id>`.
+CATCH_UP_WINDOW_SECONDS = 3600.0
+
+# Engine job keys are local wall-clock stamps: YYYYMMDD-HHMMSS.
+_ENGINE_MEETING_ID = re.compile(r"^(\d{8})-(\d{6})$")
 
 EVENT_MEETING_STOPPED = "meeting_stopped"
 EVENT_TRANSCRIPT_READY = "transcript_ready"
@@ -167,8 +185,8 @@ def save_watch_state(state: WatchState, path: Path | None = None) -> None:
 def load_watch_state(path: Path | None = None) -> WatchState:
     """Read persisted state. Missing, malformed, or STALE state comes back unprimed.
 
-    Unprimed is the safe default: the next detect_events() call absorbs whatever
-    the engine currently reports without firing anything.
+    Unprimed is the safe default: the next detect_events() call absorbs the back
+    catalogue, then releases any recent unprocessed done jobs so they still fire.
     """
     target = path or watch_state_path()
     try:
@@ -196,11 +214,102 @@ def load_watch_state(path: Path | None = None) -> WatchState:
 # --- edge detection ---------------------------------------------------------
 
 
-def prime_watch_state(state: WatchState | None = None) -> WatchState:
-    """Snapshot the jobs that already exist, so old meetings do not fire on startup.
+def parse_engine_meeting_id(meeting_id: str) -> datetime | None:
+    """YYYYMMDD-HHMMSS → naive local datetime. None if this is not an engine id."""
+    match = _ENGINE_MEETING_ID.fullmatch(str(meeting_id or "").strip())
+    if not match:
+        return None
+    try:
+        return datetime.strptime(f"{match.group(1)}-{match.group(2)}", "%Y%m%d-%H%M%S")
+    except ValueError:
+        return None
+
+
+def meeting_id_age_seconds(meeting_id: str, now: datetime | None = None) -> float | None:
+    """Seconds since the engine stamped this id. None when the id is not a stamp."""
+    stamp = parse_engine_meeting_id(meeting_id)
+    if stamp is None:
+        return None
+    current = now or datetime.now()
+    if current.tzinfo is not None:
+        current = current.replace(tzinfo=None)
+    return max(0.0, (current - stamp).total_seconds())
+
+
+def journal_has_processed(meeting_id: str) -> bool:
+    """True when the executions journal already holds a successful row for this id.
+
+    The journal is the dedup authority. watcher.json only remembers *edges we
+    have seen*; a process that primed, crashed, or hung after marking a job
+    seen still leaves the journal empty, and that is the meeting we must catch
+    up. A successful `--replay` of the same id is also a processed meeting.
+    """
+    try:
+        records = results.read_executions(meeting_id)
+    except Exception:  # noqa: BLE001 — an unreadable journal is "not processed"
+        return False
+    execution = results.RECORD_TYPE_EXECUTION
+    return any(
+        record.get("record_type", execution) == execution and record.get("ok")
+        for record in records
+    )
+
+
+def should_catch_up_job(
+    meeting_id: str,
+    job: dict,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """True for a done, recent, never-journaled engine job. Pure enough to test."""
+    if not isinstance(job, dict) or job.get("state") != JOB_STATE_DONE:
+        return False
+    age = meeting_id_age_seconds(meeting_id, now)
+    if age is None or age > CATCH_UP_WINDOW_SECONDS:
+        return False
+    return not journal_has_processed(meeting_id)
+
+
+def release_unprocessed_recent_jobs(
+    state: WatchState,
+    status_payload: dict,
+    *,
+    now: datetime | None = None,
+) -> list[str]:
+    """Forget recent done jobs the journal has never seen, so detect_events fires them.
+
+    Returns the meeting ids released, newest-looking first, for the log line.
+    Processing jobs are left marked seen (not ready): the transcript is still
+    being written, and TRANSCRIPT_READY will fire when state flips to done.
+    """
+    jobs = (status_payload or {}).get("jobs") or {}
+    released: list[str] = []
+    for meeting_id, job in jobs.items():
+        body = job if isinstance(job, dict) else {}
+        if not should_catch_up_job(meeting_id, body, now=now):
+            continue
+        state.known_job_ids.discard(meeting_id)
+        state.stopped_meeting_ids.discard(meeting_id)
+        state.ready_meeting_ids.discard(meeting_id)
+        state.summarized_ids.discard(meeting_id)
+        released.append(meeting_id)
+    if released:
+        print(
+            "[watcher] catch-up: "
+            f"{len(released)} unprocessed meeting(s) from the last hour will fire: "
+            + ", ".join(sorted(released))
+        )
+    return released
+
+
+def prime_watch_state(state: WatchState | None = None, *, now: datetime | None = None) -> WatchState:
+    """Snapshot jobs that already exist, then release any that still need a pass.
 
     Critical for the demo: without priming, the first poll would treat every
     historical job id as a brand-new meeting and fire the whole back catalogue.
+    Equally critical: silently absorbing a meeting that finished while we were
+    down is how Follow-through stays blank after a live Stop. The journal
+    decides which recent done jobs still need to run.
 
     If the engine is unreachable right now, the state stays UNPRIMED and priming
     happens on the first successful poll instead — an engine that is still
@@ -212,10 +321,12 @@ def prime_watch_state(state: WatchState | None = None) -> WatchState:
         print("[watcher] engine unreachable at startup — will prime on first successful poll")
         return state
     absorb_status_payload(payload, state)
+    released = release_unprocessed_recent_jobs(state, payload, now=now)
     state.is_primed = True
+    extra = f"; catching up {len(released)}" if released else ""
     print(
         f"[watcher] primed with {len(state.known_job_ids)} existing job(s); "
-        "only new meetings will fire"
+        f"only new meetings will fire{extra}"
     )
     return state
 
@@ -240,12 +351,18 @@ def absorb_status_payload(status_payload: dict, state: WatchState) -> None:
     state.was_recording = bool(recorder.get("recording"))
 
 
-def detect_events(status_payload: dict, state: WatchState) -> list[MeetingEvent]:
-    """Pure edge detection: one status payload + prior state -> new events.
+def detect_events(
+    status_payload: dict,
+    state: WatchState,
+    *,
+    now: datetime | None = None,
+) -> list[MeetingEvent]:
+    """Edge detection: one status payload + prior state -> new events.
 
-    Mutates `state` to record what has now been seen. Pure with respect to the
-    outside world (no I/O), which is what makes the watcher testable from a
-    handful of canned payloads.
+    Mutates `state` to record what has now been seen. Once primed, this is pure
+    with respect to the outside world (no I/O) — that is what makes the watcher
+    testable from a handful of canned payloads. The unprimed path consults the
+    journal so a meeting that finished while we were down still fires.
 
     An empty payload (engine down) yields no events and changes no state — a
     connection failure is not evidence that a meeting ended.
@@ -259,8 +376,11 @@ def detect_events(status_payload: dict, state: WatchState) -> list[MeetingEvent]
 
     if not state.is_primed:
         absorb_status_payload(status_payload, state)
+        release_unprocessed_recent_jobs(state, status_payload, now=now)
         state.is_primed = True
-        return []
+        # Fall through: catch-up jobs are now unknown and must emit on THIS
+        # observation. Returning here would wait for a later poll that looks
+        # identical and produce nothing — the live-demo failure mode.
 
     events: list[MeetingEvent] = []
     jobs = status_payload.get("jobs") or {}
@@ -334,6 +454,7 @@ def watch_for_meeting_events(
     primes against a dead port and spends its first thirty seconds in backoff
     while the engine it just started comes up behind it.
     """
+    _unbuffer_stdio()
     if launch_engine:
         meetingscribe_source.ensure_engine_running()
 
@@ -341,8 +462,15 @@ def watch_for_meeting_events(
         state = load_watch_state(state_path) if persist else WatchState()
     if not state.is_primed:
         state = prime_watch_state(state)
-        if persist and state.is_primed:
-            save_watch_state(state, state_path)
+    else:
+        # A fresh watcher.json can claim we already handled a job we never
+        # wrote to the journal (primed, then hung, then killed). Release those
+        # before the first poll so detect_events still fires them.
+        payload = meetingscribe_source.fetch_engine_status()
+        if payload:
+            release_unprocessed_recent_jobs(state, payload)
+    if persist and state.is_primed:
+        save_watch_state(state, state_path)
 
     started_at = time.monotonic()
     next_status_poll_at = 0.0
@@ -402,6 +530,22 @@ def watch_for_meeting_events(
                 print(f"[watcher] tick handler raised: {error}")
 
         time.sleep(fast_poll_interval_seconds)
+
+
+def _unbuffer_stdio() -> None:
+    """Line-buffer stdout/stderr so `nohup` without `-u` still prints each edge.
+
+    The live-demo log was empty because Python block-buffers when stdout is not
+    a TTY. `-u` is the runbook; this makes the loop honest even without it.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(line_buffering=True)
+        except Exception:  # noqa: BLE001 — a closed pipe is not worth crashing over
+            pass
 
 
 def _backoff_seconds(consecutive_failures: int) -> float:

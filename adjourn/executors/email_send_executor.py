@@ -2,31 +2,31 @@
 
 Payload shape:
     {
-      "to": ["div@example.com"],       # explicit addresses win over the address book
-      "person": "Div",                 # or entity_refs.person — resolved via the book
+      "to": ["alex@example.com"],       # explicit addresses win over the address book
+      "person": "Alex",                 # or entity_refs.person — resolved via the book
       "cc": [],
       "subject": "Follow-up: cache layer timeline",
       "body_text": "...",              # plain text; the verbatim quote is added here
       "recap_path": "/…/recaps/m1.html",   # optional; inlined below the message
-      "human_preview": "Email Div: cache layer timeline"
+      "human_preview": "Email Alex: cache layer timeline"
     }
 
-ADDRESS BOOK. A name in a meeting ("I'll email Div tonight") is not an address.
+ADDRESS BOOK. A name in a meeting ("I'll email Alex tonight") is not an address.
 Resolution is a small deterministic table in adjourn/.env:
 
-    ADJOURN_ADDRESS_BOOK="Div=div@example.com; Priya=priya@example.com"
+    ADJOURN_ADDRESS_BOOK="Alex=alex@example.com; Priya=priya@example.com"
 
 Separators are ';' or newlines; matching is case-insensitive on the whole name
 and on the first name. A name that is NOT in the book is never guessed at — the
 card fails and says which name it could not resolve. Emailing a guessed address
 is the one failure mode that cannot be undone or apologised for.
 
-REGRET WINDOW: 60s, and it matters more here than anywhere else.
+READY TO SEND. Email never auto-fires. The board holds the draft until a human
+edits (or doesn't) and presses Send. There is no unsend after that.
 
 =============================================================================
  EMAIL IS IRREVERSIBLE. There is no unsend. undo() returns False and says so;
- it does NOT pretend. The countdown IS the undo for this executor — which is
- exactly why the regret window exists and why the board's ring is visible.
+ it does NOT pretend. Don't send, on the draft, is the last chance to stop it.
 =============================================================================
 
 Live transport: stdlib smtplib + email.message.EmailMessage.
@@ -75,7 +75,7 @@ _HTML_BODY = re.compile(r"<body[^>]*>(.*)</body>", re.IGNORECASE | re.DOTALL)
 
 
 def read_address_book() -> dict[str, str]:
-    """{"div": "div@example.com", ...} from ADJOURN_ADDRESS_BOOK. Empty when unset.
+    """{"alex": "alex@example.com", ...} from ADJOURN_ADDRESS_BOOK. Empty when unset.
 
     Deterministic parsing, no cleverness: "Name=address" pairs separated by ';'
     or newlines. Malformed entries are skipped rather than raised — a typo in
@@ -354,7 +354,7 @@ def undo(result: results.ExecutorResult) -> bool:
     if result.mode == results.MODE_SIM:
         print("[email_send] simulated message was never sent — nothing to undo")
         return True
-    print("[email_send] cannot undo a sent email — the regret window was the undo")
+    print("[email_send] cannot undo a sent email — it already left")
     return False
 
 
@@ -363,7 +363,7 @@ def describe_undo_capability(result: results.ExecutorResult) -> str:
     button for a live email rather than offering an action that will refuse."""
     if result.mode == results.MODE_SIM:
         return "Nothing was sent — discarding the simulated message."
-    return "Email is irreversible — the 60-second countdown was the undo."
+    return "Email is irreversible — Don't send before it goes out."
 
 
 # --- TRANSPORT SWAP (bottom of the module) ----------------------------------

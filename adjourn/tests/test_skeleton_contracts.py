@@ -123,8 +123,11 @@ check("key shape is kind-prefixed", key_one == "github_update:4:cache-layer", ke
 check("different kind -> different key",
       planner.build_dedup_key("linear_create", "cache layer") != key_one)
 check("empty parts dropped", planner.build_dedup_key("recap_page", "", "m1") == "recap_page:m1")
-check("slack regret window is 60", planner.choose_regret_window("slack_send") == 60)
-check("email regret window is 60", planner.choose_regret_window("email_send") == 60)
+check("slack waits for Send", planner.requires_send_approval("slack_send"))
+check("email waits for Send", planner.requires_send_approval("email_send"))
+check("github does not wait for Send", planner.requires_send_approval("github_update") is False)
+check("slack has no auto-fire countdown", planner.choose_regret_window("slack_send") == 0)
+check("email has no auto-fire countdown", planner.choose_regret_window("email_send") == 0)
 check("github fires immediately", planner.choose_regret_window("github_update") == 0)
 
 print("\n== planner: no model may be imported here ==")

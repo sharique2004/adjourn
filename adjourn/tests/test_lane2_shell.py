@@ -112,6 +112,11 @@ check("board.css wraps the tab bar rather than the words",
       viewbar_rule.group(0) if viewbar_rule else "no .viewbar rule")
 check("and keeps each tab on one line",
       re.search(r"\.viewbar \.viewlink\s*\{[^}]*white-space:\s*nowrap", board_css) is not None)
+check(
+    "cards and the rail share the masthead's width — they do not hang past the tagline",
+    "var(--page) + var(--rail-width)" not in board_css
+    and "calc(var(--page) +" not in board_css,
+)
 check("the current tab is marked on connections",
       'href="/connections">Connections' in client.get("/connections").get_data(as_text=True))
 
@@ -269,8 +274,8 @@ check("the header names it", "1 cancelled" in state["totals_line"], state["total
 print("\n== dress finding 5: the counts on screen are the counts in the narration ==")
 
 statements = [
-    type("S", (), {"segment_id": f"agi-s{n}", "kind": "decision"})() for n in (1, 3, 7)
-] + [type("S", (), {"segment_id": "agi-s7.2", "kind": "update"})()]
+    type("S", (), {"segment_id": f"lr-s{n}", "kind": "decision"})() for n in (1, 3, 7)
+] + [type("S", (), {"segment_id": "lr-s7.2", "kind": "update"})()]
 status = orchestrator.extraction_status_from_statements(
     statements, source="final", segment_count=28
 )
@@ -340,7 +345,7 @@ check("the token is NOT in /healthz", TOKEN not in client.get("/healthz").get_da
 check("/healthz reports that a token is required",
       client.get("/healthz").get_json()["undo_token_required"] is True)
 
-target = "linear_create:agi-living-room:benchmark-lru"
+target = "linear_create:living-room-standup:benchmark-lru"
 no_token = client.post(f"/undo/{target}")
 check("an undo with no token is 403", no_token.status_code == 403, str(no_token.status_code))
 check("the refusal says what to do", "reload the board" in no_token.get_json()["message"])
@@ -510,7 +515,7 @@ def _counting_undo(record, dedup_key):
 _real_undo_record = board_server.undo_execution_record
 board_server.undo_execution_record = _counting_undo
 try:
-    replayed = board_server.perform_undo("github_update:agi-living-room:issue-1:update")
+    replayed = board_server.perform_undo("github_update:living-room-standup:issue-1:update")
 finally:
     board_server.undo_execution_record = _real_undo_record
 check("an orchestrator-handled undo is dispatched exactly once", len(second_pass) == 1,
@@ -524,7 +529,7 @@ print("\n== lifecycle: an undone action is struck through in the recap file ==")
 from adjourn.executors import recap_page_executor  # noqa: E402
 
 page = recap_page_executor.render_recap_html({
-    "meeting_title": "AGI Inc. living room",
+    "meeting_title": dress_journal.MEETING_TITLE,
     "meeting_id": dress_journal.MEETING_ID,
     "statements": [],
     "segment_count": 28,
@@ -730,7 +735,7 @@ orchestrator.mirror_meeting_in_background = lambda *a, **k: None
 orchestrator.open_memory_safely = lambda *a, **k: None
 _graph_before = _count_demo_graph_nodes()
 try:
-    fired = orchestrator._replay_transcript_file(config.FIXTURES_DIR / "agi-living-room.jsonl")
+    fired = orchestrator._replay_transcript_file(config.FIXTURES_DIR / "living-room-standup.jsonl")
     check("a meeting that produced no statements still fires exactly one action",
           len(fired) == 1, str([r.kind for r in fired]))
     check("and that action is the recap", fired and fired[0].kind == "recap_page")
@@ -740,7 +745,7 @@ try:
           str(len(silent_state["cards"])))
     check("the header counts it", "1 action" in silent_state["totals_line"],
           silent_state["totals_line"])
-    silent_recap = (silent_sandbox / "recaps") / "agi-living-room.html"
+    silent_recap = (silent_sandbox / "recaps") / "living-room-standup.html"
     check("a recap page was written", silent_recap.is_file())
     written = silent_recap.read_text(encoding="utf-8")
     check("the page says how many lines were spoken", "lines spoken" in written)
@@ -761,7 +766,7 @@ finally:
         os.environ["ADJOURN_PIPELINE"] = _previous_pipeline
     os.environ["ADJOURN_BOARD_JOURNAL"] = str(JOURNAL)
     orchestrator._recap_actions_by_meeting.clear()
-    parked_silent = orchestrator.recap_action_path("agi-living-room")
+    parked_silent = orchestrator.recap_action_path("living-room-standup")
     if parked_silent.exists():
         parked_silent.unlink()
     check("this test also left state/recap_actions empty", not parked_silent.exists())

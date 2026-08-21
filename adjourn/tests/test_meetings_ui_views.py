@@ -370,6 +370,20 @@ def test_presentation_mode_never_hides_the_recording_being_made(presenting):
     assert state["recording_now"] is True
 
 
+def test_presentation_mode_never_hides_a_meeting_that_just_ended(presenting):
+    """Stop must not make the row vanish the moment transcription finishes."""
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    just_ended = dict(ROW, id=stamp, status="done", title="Just now")
+    engine = FakeEngine({"/api/meetings": lambda p: page(None, items=[just_ended, ROW, DEMO_ROW])})
+    state = build_library(engine)
+    visible = {row["id"] for row in state["rows"]}
+    assert stamp in visible
+    assert presenting in visible
+    assert ROW["id"] not in visible
+
+
 def test_presentation_mode_guards_the_detail_page_as_well(presenting, client_with):
     """A guessed or bookmarked URL must not walk around the library filter."""
     allowed = dict(MEETING, id=presenting)
@@ -869,12 +883,12 @@ def test_the_served_assets_name_no_second_product():
 #
 # "From a card, the quote traces back to the transcript" is one of the five
 # things the demo has to do, and on the tape the demo actually runs (`--replay`,
-# i.e. agi-living-room) it could not happen: nothing was recorded, so the target
+# i.e. living-room-standup) it could not happen: nothing was recorded, so the target
 # 404'd and the board correctly refused to link to it. These pin the fix and,
 # more importantly, the two things the fix must NOT do — invent a recording, or
 # widen the id gate that guards the engine and the filesystem.
 
-DEMO_TAPE = "agi-living-room"
+DEMO_TAPE = "living-room-standup"
 
 
 def test_a_fixture_tape_renders_its_transcript(client_with):
@@ -907,8 +921,8 @@ def test_the_fixture_branch_does_not_widen_the_engine_id_gate():
 
 
 @pytest.mark.parametrize("bad", [
-    "regression/fp-social", "../fixtures/agi-living-room", "..",
-    "agi_living_room", "AGI-LIVING-ROOM", "nope",
+    "regression/fp-social", "../fixtures/living-room-standup", "..",
+    "living_room_standup", "LIVING-ROOM-STANDUP", "nope",
 ])
 def test_a_fixture_id_cannot_walk_out_of_the_fixtures_directory(bad, client_with):
     from adjourn import fixture_library

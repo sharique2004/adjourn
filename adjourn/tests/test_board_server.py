@@ -1,7 +1,7 @@
 """Board test — the demo surface renders, updates, and undoes. (Lane E)
 
 Runs the Flask app against a FABRICATED journal covering every action kind plus
-two countdown items, and asserts on the actual HTML. If this goes red the board
+two send-holds, and asserts on the actual HTML. If this goes red the board
 is lying about something on screen.
 
 Run from the repo root:
@@ -64,7 +64,9 @@ check(
 )
 check("fixture includes a failed action", any(not record["ok"] for record in fabricated))
 check("fixture includes both modes", {"live", "sim"} <= {r["mode"] for r in fabricated})
-check("fixture includes two countdown items", len(orchestrator.read_pending_actions(pending)) == 2)
+check("fixture includes two send-holds", len(orchestrator.read_pending_actions(pending)) == 2)
+check("both holds wait for Send",
+      all(item.hold_for_send for item in orchestrator.read_pending_actions(pending)))
 
 
 print("\n== board state ==")
@@ -95,10 +97,15 @@ check("executors still compose from the journal when pipeline.json is missing",
       and state["pipeline"]["executors"]["fired_live"] >= 1
       and state["pipeline"]["executors"]["fired_sim"] >= 1)
 check("pending items are exposed", len(state["pending"]) == 2)
-check("pending sorted by soonest", state["pending"][0]["seconds_remaining"] <= state["pending"][1]["seconds_remaining"])
+check("pending items wait for Send", all(item["hold_for_send"] for item in state["pending"]))
 check("totals line reads as a sentence", "actions" in state["totals_line"] and "live" in state["totals_line"])
 check("mode note is present and honest", "mixed" in state["mode_note"] or "sim" in state["mode_note"])
 check("meeting id resolved from the data", state["meeting"]["meeting_id"] == "20260821-093000")
+check("follow-through is grouped by meeting", len(state["meeting_groups"]) == 1)
+check("the meeting group wears a title, not a pile",
+      bool(state["meeting_groups"][0]["display_title"]))
+check("drafts sit under that meeting",
+      len(state["meeting_groups"][0]["pending"]) == 2)
 
 version = board_server.compute_version(state)
 later = board_server.load_board_state(datetime.now(UTC) + timedelta(seconds=9))
@@ -134,7 +141,7 @@ live_email = {
 }
 live_card = board_server.build_card(live_email, 0, set(), datetime.now(UTC))
 check("a live email refuses undo", not live_card["can_undo"])
-check("and says the countdown was the undo", "countdown was the undo" in live_card["undo_note"])
+check("and says it cannot be unsent", "cannot be unsent" in live_card["undo_note"])
 
 
 print("\n== formatters ==")
@@ -144,9 +151,39 @@ check("unknown duration is empty", board_server.format_duration(None) == "")
 check("bad timestamp does not raise", board_server.format_clock_time("not-a-time") == "")
 check("elapsed reads in seconds", board_server.format_elapsed_since(
     (datetime.now(UTC) - timedelta(seconds=38)).isoformat()) == "38s ago")
+check("a meeting stamp has a date and a clock",
+      "·" in board_server.format_meeting_when("2026-08-21T21:13:00+00:00")
+      and "21" in board_server.format_meeting_when("2026-08-21T21:13:00+00:00"))
 check("initials from a full name", board_server.build_initials("Sharique Khatri") == "SK")
 check("initials from one name", board_server.build_initials("Priya") == "PR")
 check("initials from nothing", board_server.build_initials("") == "··")
+
+print("\n== follow-through groups by meeting ==")
+_older = {
+    "meeting_id": "prior-standup",
+    "fired_at": "2026-08-14T18:00:00+00:00",
+    "kind": "github_update",
+    "state": "ok",
+}
+_newer = {
+    "meeting_id": "living-room-standup",
+    "fired_at": "2026-08-21T21:00:00+00:00",
+    "kind": "linear_move",
+    "state": "ok",
+}
+_draft = {
+    "meeting_id": "living-room-standup",
+    "hold_for_send": True,
+    "created_at": "2026-08-21T21:01:00+00:00",
+    "id": "slack_send:x",
+}
+_groups = board_server.build_meeting_groups([_older, _newer], [_draft])
+check("two meetings make two groups", len(_groups) == 2)
+check("the newest meeting leads", _groups[0]["meeting_id"] == "living-room-standup")
+check("the older meeting follows", _groups[1]["meeting_id"] == "prior-standup")
+check("a draft stays under its own meeting", len(_groups[0]["pending"]) == 1)
+check("the other meeting does not inherit that draft", _groups[1]["pending"] == [])
+check("each group is named", all(group["display_title"] for group in _groups))
 
 
 print("\n== the page itself ==")
@@ -181,7 +218,9 @@ check("GET / is 200", page.status_code == 200, str(page.status_code))
 markup = page.get_data(as_text=True)
 check("page is a complete document", markup.startswith("<!doctype html>") and "</html>" in markup)
 check("quiet header line is on the page", board_server.QUIET_HEADER_LINE in markup)
-check("meeting title from meeting.json or fallback", "<h1 class=\"meeting-title\"" in markup)
+check("the page is named Follow-through", ">Follow-through</h1>" in markup)
+check("work is grouped under a meeting header", 'class="meeting-block"' in markup)
+check("the meeting header names the meeting", 'class="meeting-block-title"' in markup)
 check("totals line rendered", state["totals_line"] in markup)
 check("stylesheet linked", "/static/board.css" in markup)
 check("script linked", "/static/board.js" in markup)
@@ -196,11 +235,10 @@ check("verbatim quote present", "just needs review" in markup)
 check("quote is in the serif blockquote", 'class="quote"' in markup)
 check("speaker attributed", "Priya" in markup)
 check("click-through url rendered", "github.com/sharique2004/adjourn/issues/14" in markup)
-check("countdown ring rendered", 'class="ring-progress"' in markup)
-check("ring offset is server-rendered", "stroke-dashoffset=" in markup)
+check("Ready to send is on the board", "Ready to send" in markup)
+check("draft editor rendered", 'class="compose-body"' in markup and 'class="send-now"' in markup)
 check("undo buttons rendered", markup.count("data-undo=") >= 3)
-check("no input affordances beyond undo",
-      "<input" not in markup and "<textarea" not in markup and "<select" not in markup)
+check("no stray select controls", "<select" not in markup)
 check("ledger link present", 'href="/ledger"' in markup)
 check("guts panel is on the board", 'class="guts"' in markup and "Watcher" in markup)
 check("guts panel names every stage",
@@ -219,7 +257,7 @@ print("\n== fragment endpoint ==")
 fragment = client.get("/api/fragment").get_json()
 check("fragment carries a version", bool(fragment["version"]))
 check("fragment carries cards html", 'data-kind="slack_send"' in fragment["cards_html"])
-check("fragment carries pending html", "ring-progress" in fragment["pending_html"])
+check("fragment carries pending html", "compose-body" in fragment["cards_html"])
 check("fragment carries header html", board_server.QUIET_HEADER_LINE in fragment["header_html"])
 check("fragment carries guts html", 'class="guts"' in fragment["guts_html"] and "Watcher" in fragment["guts_html"])
 check("fragment card html matches the page", 'class="card"' in fragment["cards_html"])
@@ -279,12 +317,12 @@ print("\n== undo ==")
 waiting_before = orchestrator.read_pending_actions(pending)
 cancel_key = waiting_before[0].dedup_key
 cancelled = client.post(f"/undo/{cancel_key}")
-check("cancelling a countdown is 200", cancelled.status_code == 200)
+check("cancelling a draft is 200", cancelled.status_code == 200)
 check("cancel reports cancelled", cancelled.get_json()["action"] == "cancelled")
 still_waiting = [item.dedup_key for item in orchestrator.read_pending_actions(pending) if item.is_waiting]
-check("cancelled item leaves the countdown", cancel_key not in still_waiting)
-check("the other countdown survives", len(still_waiting) == 1)
-check("cancelled item disappears from the countdown column", cancel_key not in [
+check("cancelled item leaves the draft list", cancel_key not in still_waiting)
+check("the other draft survives", len(still_waiting) == 1)
+check("cancelled item disappears from Ready to send", cancel_key not in [
     item["id"] for item in board_server.load_board_state()["pending"]
 ])
 # ...but it does NOT disappear from the board. A cancel used to leave no trace
@@ -299,6 +337,38 @@ check("a cancelled card offers no undo", _cancelled_cards[0]["can_undo"] is Fals
 check("the totals line counts it as cancelled, not as an action",
       "1 cancelled" in _after_cancel["totals_line"]
       and _after_cancel["totals"]["cancelled"] == 1)
+
+print("\n== send a draft ==")
+os.environ["ADJOURN_SIM"] = "1"
+from adjourn import config as _config  # noqa: E402
+_original_journal = _config.executions_journal_path
+_original_pending = _config.pending_actions_path
+_config.executions_journal_path = board_server.journal_path
+_config.pending_actions_path = board_server.pending_path
+try:
+    send_key = still_waiting[0]
+    sent = client.post(
+        f"/send/{send_key}",
+        json={"text": "Thursday at two still works.", "subject": "Thursday review"},
+    )
+    send_body = sent.get_json()
+    check("sending a draft is 200", sent.status_code == 200, str(send_body))
+    check("send reports sent", send_body["ok"] is True and send_body["action"] == "sent")
+    check("the draft left Ready to send",
+          send_key not in [
+              item.dedup_key
+              for item in orchestrator.read_pending_actions(pending)
+              if item.is_waiting
+          ])
+    check("the send was journaled",
+          send_key in results.read_fired_dedup_keys(path=journal))
+    refused_again = client.post(f"/send/{send_key}", json={"text": "again"})
+    check("a second Send refuses",
+          refused_again.status_code == 409
+          and refused_again.get_json()["action"] == "refused")
+finally:
+    _config.executions_journal_path = _original_journal
+    _config.pending_actions_path = _original_pending
 
 # A simulated send is the safe thing to undo in a test: every executor
 # short-circuits a sim result without touching a transport, so this exercises
@@ -316,8 +386,8 @@ undo_records = [
 check("the undo was journaled", len(undo_records) == 1)
 check("the undo record carries the key", undo_records[0]["dedup_key"] == slack_key)
 check("the undo record records success", undo_records[0]["undo_ok"] is True)
-# +1 undo record and +1 cancellation record, both appended.
-check("history was appended, not rewritten", len(results.read_executions(path=journal)) == len(fabricated) + 2)
+# +1 undo, +1 cancellation, +1 send — all appended.
+check("history was appended, not rewritten", len(results.read_executions(path=journal)) == len(fabricated) + 3)
 
 undone_state = board_server.load_board_state()
 undone_card = next(card for card in undone_state["cards"] if card["id"] == slack_key)
@@ -349,9 +419,9 @@ print("\n== pipeline.json updates the guts panel ==")
 populated = orchestrator.PipelineStatus(
     mode="replay",
     pass_name="replay",
-    meeting_id="agi-living-room",
+    meeting_id="living-room-standup",
     meeting_title="MMM Standup — living room",
-    watcher=orchestrator.watcher_status_transcript_ready("agi-living-room", replay=True),
+    watcher=orchestrator.watcher_status_transcript_ready("living-room-standup", replay=True),
     extraction=orchestrator.ExtractionStatus(
         phase=orchestrator.STAGE_DONE,
         statement_count=11,
@@ -744,7 +814,7 @@ def _write_batch(index: int, total: int, rows: list[dict]) -> None:
         "updated_at": "2026-08-21T02:14:07Z",
         "mode": "replay",
         "pass_name": "replay",
-        "meeting_id": "agi-living-room",
+        "meeting_id": "living-room-standup",
         "watcher": {"phase": "transcript_ready", "detail": "final transcript on disk"},
         "extraction": {"phase": "running", "statement_count": len(rows),
                        "segment_count": 28, "silent_count": 0,
@@ -786,6 +856,32 @@ check("the rail names the batch on screen, not only in the API",
       "batch 4/4" in _advance_markup)
 check("the always-on rail is still the one the contract names",
       "data-guts-rail" in _advance_markup and '<details class="guts"' not in _advance_markup)
+
+print("\n== meeting titles never shout an organisation prefix ==")
+
+check(
+    "living-room-standup is a spoken title",
+    board_server.humanize_meeting_id("living-room-standup") == "Living room standup",
+)
+check(
+    "an internal agi-living-room id is the same spoken title",
+    board_server.humanize_meeting_id("agi-living-room") == "Living room standup",
+)
+check(
+    "...and the letters a-g-i do not appear in it",
+    "agi" not in board_server.humanize_meeting_id("agi-living-room").lower(),
+)
+check(
+    "an unknown agi- slug drops the prefix rather than shouting it",
+    board_server.humanize_meeting_id("agi-planning-sync") == "Planning sync",
+)
+from adjourn.tests import dress_journal  # noqa: E402
+check(
+    "the dress-rehearsal masthead never says the organisation prefix",
+    "agi" not in dress_journal.MEETING_TITLE.lower()
+    and dress_journal.MEETING_TITLE == "Living room standup",
+    dress_journal.MEETING_TITLE,
+)
 
 # The bar is a claim about work in flight. With no batching reported it must not
 # render at all — a progress bar with nothing behind it is a progress bar that lies.
@@ -890,7 +986,7 @@ finally:
 
 check("no meeting id means no link", board_server.card_transcript_url("") == "")
 
-# THE DEMO TAPE ITSELF. `--replay` with no target runs agi-living-room, and beat
+# THE DEMO TAPE ITSELF. `--replay` with no target runs living-room-standup, and beat
 # E — "from a card, the quote traces back to the transcript" — has to happen on
 # that tape and not only on a live recording. No recording exists for it, but the
 # TRANSCRIPT does: it is the .jsonl extraction reads. fixture_library hands that
@@ -899,7 +995,7 @@ check("no meeting id means no link", board_server.card_transcript_url("") == "")
 board_server._TRANSCRIPT_PRESENT.clear()
 board_server._TRANSCRIPT_MISSES.clear()
 check("the demo's own replay tape has somewhere for a quote to go",
-      board_server.card_transcript_url("agi-living-room") == "/meetings/agi-living-room")
+      board_server.card_transcript_url("living-room-standup") == "/meetings/living-room-standup")
 check("...and the board can name it, rather than printing its internal slug",
       board_server.read_meeting_header("prior-standup")["title"] == "Adjourn standup — 14 Aug",
       board_server.read_meeting_header("prior-standup")["title"])

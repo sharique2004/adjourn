@@ -50,7 +50,7 @@ from . import config, results
 # The meetings a rehearsal writes into memory. The PRIOR standup is deliberately
 # not here: it is the seed, and forgetting it would quietly disarm the conflict
 # beat while leaving everything looking fine.
-DEFAULT_REHEARSAL_MEETINGS: tuple[str, ...] = ("agi-living-room", "pr-review-beat")
+DEFAULT_REHEARSAL_MEETINGS: tuple[str, ...] = ("living-room-standup", "pr-review-beat")
 
 # Entity labels a rehearsal creates and a reset must sweep when they are left
 # edgeless. Issue is NOT in this set: the prior-standup seed legitimately holds

@@ -6,7 +6,8 @@ Run:
 
 What this covers:
   * watcher edge detection from canned /api/status payloads, including the
-    priming trap, engine restarts, watcher restarts, and staleness re-priming
+    priming trap, engine restarts, watcher restarts, staleness re-priming, and
+    catch-up of recent unprocessed done jobs (the journal is the authority)
   * the live-snapshot adapter against a synthetic /api/live document, including
     cross-track echo suppression
   * the final-transcript adapter against a REAL finished meeting on this machine
@@ -247,6 +248,261 @@ with tempfile.TemporaryDirectory() as directory:
     (Path(directory) / "bad.json").write_text("{not json")
     check("a malformed state file reads as unprimed", watcher.load_watch_state(Path(directory) / "bad.json").is_primed is False)
 
+print("\n== watcher: catch-up of meetings that finished while we were down ==")
+
+# Anchored to the REAL clock, not a hardcoded date: the watch-loop section below
+# runs release_unprocessed_recent_jobs on the wall clock, so a fixed stamp rots
+# out of the one-hour catch-up window within an hour of being written (it did).
+CATCH_NOW = datetime.now().replace(microsecond=0)
+
+
+def _engine_stamp(minutes_ago: int) -> str:
+    return (CATCH_NOW - timedelta(minutes=minutes_ago)).strftime("%Y%m%d-%H%M%S")
+
+
+RECENT_DONE = _engine_stamp(20)   # 20 minutes before CATCH_NOW
+OLD_DONE = "20260101-000000"
+JOURNALED = _engine_stamp(25)     # recent, but the journal already has it
+STILL_PROCESSING = _engine_stamp(10)
+
+saved_journal = watcher.journal_has_processed
+watcher.journal_has_processed = lambda meeting_id: meeting_id == JOURNALED
+try:
+    check("a twenty-minute-old stamp is inside the catch-up window",
+          watcher.meeting_id_age_seconds(RECENT_DONE, CATCH_NOW) == 20 * 60)
+    check("a January stamp is outside the catch-up window",
+          watcher.meeting_id_age_seconds(OLD_DONE, CATCH_NOW) > watcher.CATCH_UP_WINDOW_SECONDS)
+    check("a fixture id is not an engine stamp",
+          watcher.meeting_id_age_seconds("living-room-standup", CATCH_NOW) is None)
+
+    mixed = watcher.WatchState()
+    mixed_events = watcher.detect_events(
+        status_payload({OLD_DONE: DONE, RECENT_DONE: DONE, JOURNALED: DONE}),
+        mixed,
+        now=CATCH_NOW,
+    )
+    mixed_ids = [event.meeting_id for event in mixed_events]
+    check(
+        "old back-catalogue still does not fire on prime",
+        OLD_DONE not in mixed_ids,
+        str(mixed_ids),
+    )
+    check(
+        "a recent unprocessed done job fires both phases on prime",
+        [event.event for event in mixed_events if event.meeting_id == RECENT_DONE]
+        == [watcher.EVENT_MEETING_STOPPED, watcher.EVENT_TRANSCRIPT_READY],
+        str([(event.event, event.meeting_id) for event in mixed_events]),
+    )
+    check(
+        "a recent job already in the journal does not re-fire",
+        JOURNALED not in mixed_ids,
+        str(mixed_ids),
+    )
+    check("the old job stayed marked seen", OLD_DONE in mixed.known_job_ids)
+    check("the journaled job stayed marked seen", JOURNALED in mixed.known_job_ids)
+
+    stranded = watcher.WatchState(
+        known_job_ids={RECENT_DONE, OLD_DONE, STILL_PROCESSING},
+        stopped_meeting_ids={RECENT_DONE, OLD_DONE, STILL_PROCESSING},
+        ready_meeting_ids={RECENT_DONE, OLD_DONE},
+        is_primed=True,
+    )
+    released = watcher.release_unprocessed_recent_jobs(
+        stranded,
+        status_payload({
+            RECENT_DONE: DONE,
+            OLD_DONE: DONE,
+            STILL_PROCESSING: PROCESSING,
+        }),
+        now=CATCH_NOW,
+    )
+    check("primed state forgets a stranded recent done job", RECENT_DONE in released)
+    check("...and keeps the old one marked seen", OLD_DONE in stranded.known_job_ids)
+    check("...and does not catch up a job still processing",
+          STILL_PROCESSING not in released and STILL_PROCESSING in stranded.known_job_ids)
+    stranded_events = watcher.detect_events(
+        status_payload({RECENT_DONE: DONE, OLD_DONE: DONE}),
+        stranded,
+        now=CATCH_NOW,
+    )
+    check(
+        "the stranded job then fires stopped-then-ready",
+        [event.event for event in stranded_events if event.meeting_id == RECENT_DONE]
+        == [watcher.EVENT_MEETING_STOPPED, watcher.EVENT_TRANSCRIPT_READY],
+        str([event.event for event in stranded_events]),
+    )
+
+    # The production failure: watcher.json is fresh and primed, claiming the
+    # job was seen, and --watch starts. Catch-up has to run BEFORE the first
+    # poll or the identical payload produces nothing.
+    primed_restart = watcher.WatchState(
+        known_job_ids={RECENT_DONE},
+        stopped_meeting_ids={RECENT_DONE},
+        ready_meeting_ids={RECENT_DONE},
+        is_primed=True,
+    )
+    restart_seen: list[tuple[str, str]] = []
+    saved_engine_status = meetingscribe_source.fetch_engine_status
+    saved_record_status = meetingscribe_source.fetch_record_status
+    try:
+        meetingscribe_source.fetch_engine_status = lambda: status_payload({RECENT_DONE: DONE})
+        meetingscribe_source.fetch_record_status = lambda: {"recording": False}
+        watcher.watch_for_meeting_events(
+            lambda event: restart_seen.append((event.event, event.meeting_id)),
+            poll_interval_seconds=0.0,
+            fast_poll_interval_seconds=0.0,
+            stop_after_seconds=0.3,
+            state=primed_restart,
+            persist=False,
+            launch_engine=False,
+        )
+    finally:
+        meetingscribe_source.fetch_engine_status = saved_engine_status
+        meetingscribe_source.fetch_record_status = saved_record_status
+    check(
+        "a primed --watch restart still catches a stranded recent job",
+        (watcher.EVENT_MEETING_STOPPED, RECENT_DONE) in restart_seen
+        and (watcher.EVENT_TRANSCRIPT_READY, RECENT_DONE) in restart_seen,
+        str(restart_seen),
+    )
+finally:
+    watcher.journal_has_processed = saved_journal
+
+
+# --- THE LIVE HANDOFF -------------------------------------------------------
+#
+# The one claim the Live tab makes: press Stop and Follow-through fills itself,
+# in one sitting, without opening another window. Everything between those two
+# things is the watcher, and until now the two halves of it were tested apart —
+# the pure edge detector here, the phase functions further down — with the wire
+# between them (a closure inside run_orchestrator) asserted nowhere. That is the
+# part a demo actually depends on, so it is the part that gets a test.
+#
+# Nothing here starts an engine, a recording, or a subprocess. The engine is two
+# canned payload sequences and the phases are stubs that record their arguments.
+
+print("\n== the live handoff: Stop -> watcher -> the pipeline ==")
+
+STOPPED_ID = "20260821-133000"
+
+# The engine as a tape: recording, recording, then stopped. /api/status only
+# grows the new job key on the poll AFTER the recorder flipped, which is what
+# makes the forced poll worth having.
+record_tape = [{"recording": True}, {"recording": True}, {"recording": False}]
+status_tape = [
+    status_payload({"20260101-000000": DONE}),                        # priming
+    status_payload({"20260101-000000": DONE}),
+    status_payload({"20260101-000000": DONE, STOPPED_ID: PROCESSING}),  # the stop
+    status_payload({"20260101-000000": DONE, STOPPED_ID: DONE}),        # transcript
+]
+
+def run_watch_tape(poll_interval_seconds: float) -> list[tuple[str, str]]:
+    """Drive the real loop over the canned engine and collect what it emitted.
+
+    BOUNDED BY THE CLOCK, not by a sentinel exception: watch_for_meeting_events
+    swallows anything a callback raises (one bad handler must not end a demo), so
+    an exception thrown from on_tick would be caught and the loop would spin
+    forever. `stop_after_seconds` is the loop's own exit and the only safe one.
+    Both tapes clamp to their last element, so the extra ticks re-observe a state
+    that has already been absorbed and emit nothing.
+    """
+    record_polls = [0]
+    status_polls = [0]
+
+    def next_record_status() -> dict:
+        record_polls[0] += 1
+        return record_tape[min(record_polls[0] - 1, len(record_tape) - 1)]
+
+    def next_engine_status() -> dict:
+        status_polls[0] += 1
+        return status_tape[min(status_polls[0] - 1, len(status_tape) - 1)]
+
+    saved_record_status = meetingscribe_source.fetch_record_status
+    saved_engine_status = meetingscribe_source.fetch_engine_status
+    seen: list[tuple[str, str]] = []
+    try:
+        meetingscribe_source.fetch_record_status = next_record_status
+        meetingscribe_source.fetch_engine_status = next_engine_status
+        watcher.watch_for_meeting_events(
+            lambda event: seen.append((event.event, event.meeting_id)),
+            poll_interval_seconds=poll_interval_seconds,
+            fast_poll_interval_seconds=0.0,
+            stop_after_seconds=0.4,
+            state=watcher.WatchState(),
+            persist=False,
+            launch_engine=False,
+        )
+    finally:
+        meetingscribe_source.fetch_record_status = saved_record_status
+        meetingscribe_source.fetch_engine_status = saved_engine_status
+    return seen
+
+
+observed = run_watch_tape(poll_interval_seconds=0.0)
+check(
+    "the loop turns a live Stop into MEETING_STOPPED then TRANSCRIPT_READY",
+    observed == [
+        (watcher.EVENT_MEETING_STOPPED, STOPPED_ID),
+        (watcher.EVENT_TRANSCRIPT_READY, STOPPED_ID),
+    ],
+    str(observed),
+)
+
+# THE HALF-SECOND THE STOP EDGE BUYS. With the trigger bus set to a tick that
+# will not arrive inside this window, the ONLY thing that can pull /api/status
+# after priming is the forced poll the recorder's True->False edge triggers. If
+# that forcing were ever removed, this comes back empty and the meeting would sit
+# there looking ignored for up to a full poll interval on stage.
+forced = run_watch_tape(poll_interval_seconds=30.0)
+check(
+    "the recorder stop edge pulls the id without waiting for the slow tick",
+    (watcher.EVENT_MEETING_STOPPED, STOPPED_ID) in forced,
+    str(forced),
+)
+
+# And the wire on the other side: each edge reaches the pass it belongs to.
+dispatched: list[tuple[str, str]] = []
+saved_fast = orchestrator.handle_meeting_stopped
+saved_final = orchestrator.reconcile_from_final_transcript
+try:
+    orchestrator.handle_meeting_stopped = (
+        lambda meeting_id, memory=None: dispatched.append(("fast", meeting_id)) or []
+    )
+    orchestrator.reconcile_from_final_transcript = (
+        lambda meeting_id, memory=None: dispatched.append(("final", meeting_id)) or []
+    )
+    with tempfile.TemporaryDirectory() as pipeline_home:
+        saved_pipeline = os.environ.get("ADJOURN_PIPELINE")
+        os.environ["ADJOURN_PIPELINE"] = str(Path(pipeline_home) / "pipeline.json")
+        try:
+            for event_name in (
+                watcher.EVENT_MEETING_STOPPED,
+                watcher.EVENT_TRANSCRIPT_READY,
+                watcher.EVENT_SUMMARY_READY,
+            ):
+                orchestrator.handle_meeting_event(
+                    watcher.MeetingEvent(event_name, STOPPED_ID)
+                )
+        finally:
+            if saved_pipeline is None:
+                os.environ.pop("ADJOURN_PIPELINE", None)
+            else:
+                os.environ["ADJOURN_PIPELINE"] = saved_pipeline
+finally:
+    orchestrator.handle_meeting_stopped = saved_fast
+    orchestrator.reconcile_from_final_transcript = saved_final
+
+check(
+    "MEETING_STOPPED runs the fast pass and TRANSCRIPT_READY the final one",
+    dispatched == [("fast", STOPPED_ID), ("final", STOPPED_ID)],
+    str(dispatched),
+)
+check(
+    "SUMMARY_READY runs neither — nothing waits on the auto-summary",
+    len(dispatched) == 2,
+    str(dispatched),
+)
+
 
 # --- meetingscribe_source: live ---------------------------------------------
 
@@ -316,50 +572,58 @@ if not recent:
     note("no recordings under ~/.meetingscribe/recordings — real-meeting checks skipped")
 else:
     check("recent ids sort newest first", recent == sorted(recent, reverse=True), str(recent))
-    meeting_id = recent[0]
-    directory = meetingscribe_source.resolve_recording_directory(meeting_id)
-    check(f"resolved a folder for {meeting_id}", directory is not None)
-    check("the folder was resolved by its ' — <id>' suffix, not a cached path",
-          directory is not None and directory.name.endswith(meeting_id))
-    check("meeting.json exists in it", directory is not None and (directory / "meeting.json").exists())
+    meeting_id = None
+    for candidate in recent:
+        _probe_meta, probe_segments = meetingscribe_source.load_meeting(candidate)
+        if probe_segments:
+            meeting_id = candidate
+            break
+    if meeting_id is None:
+        note("recent recordings have no spoken segments — real-meeting checks skipped")
+    else:
+        directory = meetingscribe_source.resolve_recording_directory(meeting_id)
+        check(f"resolved a folder for {meeting_id}", directory is not None)
+        check("the folder was resolved by its ' — <id>' suffix, not a cached path",
+              directory is not None and directory.name.endswith(meeting_id))
+        check("meeting.json exists in it", directory is not None and (directory / "meeting.json").exists())
 
-    document = meetingscribe_source.read_meeting_json(meeting_id)
-    check("meeting.json parsed", bool(document))
-    check("its id matches what we asked for", document.get("id") == meeting_id)
+        document = meetingscribe_source.read_meeting_json(meeting_id)
+        check("meeting.json parsed", bool(document))
+        check("its id matches what we asked for", document.get("id") == meeting_id)
 
-    meta, segments = meetingscribe_source.load_meeting(meeting_id)
-    check("meta carries the meeting id", meta["meeting_id"] == meeting_id)
-    check("meta carries a title", bool(meta["title"]))
-    check("meta carries a YYYY-MM-DD date", len(meta["date"]) == 10 and meta["date"][4] == "-", meta["date"])
-    check("segments were produced", len(segments) > 0, f"{len(segments)} segments")
-    check("final segment ids carry the meeting id", all(s["segment_id"].startswith(f"m{meeting_id}-t") for s in segments))
-    check("no empty segment text", all(s["text"].strip() for s in segments))
-    check("speaker keys were mapped to display names", all(not s["speaker"].startswith("s") or s["speaker"].startswith("Speaker") for s in segments))
-    check("every segment has a ts", all(len(s["ts"]) == 8 for s in segments))
-    check("source is tagged final", all(s["source"] == "final" for s in segments))
+        meta, segments = meetingscribe_source.load_meeting(meeting_id)
+        check("meta carries the meeting id", meta["meeting_id"] == meeting_id)
+        check("meta carries a title", bool(meta["title"]))
+        check("meta carries a YYYY-MM-DD date", len(meta["date"]) == 10 and meta["date"][4] == "-", meta["date"])
+        check("segments were produced", len(segments) > 0, f"{len(segments)} segments")
+        check("final segment ids carry the meeting id", all(s["segment_id"].startswith(f"m{meeting_id}-t") for s in segments))
+        check("no empty segment text", all(s["text"].strip() for s in segments))
+        check("speaker keys were mapped to display names", all(not s["speaker"].startswith("s") or s["speaker"].startswith("Speaker") for s in segments))
+        check("every segment has a ts", all(len(s["ts"]) == 8 for s in segments))
+        check("source is tagged final", all(s["source"] == "final" for s in segments))
 
-    title = meetingscribe_source.read_meeting_title(meeting_id)
-    check("title resolves for the board header", bool(title) and title != meeting_id, title)
+        title = meetingscribe_source.read_meeting_title(meeting_id)
+        check("title resolves for the board header", bool(title) and title != meeting_id, title)
 
-    same_meta, same_segments = meetingscribe_source.load_meeting(directory)
-    check("loading by folder path gives the same result", same_segments == segments)
+        same_meta, same_segments = meetingscribe_source.load_meeting(directory)
+        check("loading by folder path gives the same result", same_segments == segments)
 
-    # A meeting that MeetingScribe never wrote must degrade, not raise.
-    check("an unknown meeting id resolves to None", meetingscribe_source.resolve_recording_directory("19700101-000000") is None)
-    check("an unknown meeting id reads as {}", meetingscribe_source.read_meeting_json("19700101-000000") == {})
-    ghost_meta, ghost_segments = meetingscribe_source.load_meeting("19700101-000000")
-    check("an unknown meeting loads as empty rather than raising", ghost_segments == [])
-    check("...and still reports the id it was asked about", ghost_meta["meeting_id"] == "19700101-000000")
-    check("an empty meeting id resolves to None", meetingscribe_source.resolve_recording_directory("") is None)
+        # A meeting that MeetingScribe never wrote must degrade, not raise.
+        check("an unknown meeting id resolves to None", meetingscribe_source.resolve_recording_directory("19700101-000000") is None)
+        check("an unknown meeting id reads as {}", meetingscribe_source.read_meeting_json("19700101-000000") == {})
+        ghost_meta, ghost_segments = meetingscribe_source.load_meeting("19700101-000000")
+        check("an unknown meeting loads as empty rather than raising", ghost_segments == [])
+        check("...and still reports the id it was asked about", ghost_meta["meeting_id"] == "19700101-000000")
+        check("an empty meeting id resolves to None", meetingscribe_source.resolve_recording_directory("") is None)
 
-    ready = status_payload({meeting_id: DONE})
-    check("is_transcript_ready reads a done job", meetingscribe_source.is_transcript_ready(ready, meeting_id) is True)
-    check("is_transcript_ready is False while processing",
-          meetingscribe_source.is_transcript_ready(status_payload({meeting_id: PROCESSING}), meeting_id) is False)
-    check("is_transcript_ready is False for an unknown id",
-          meetingscribe_source.is_transcript_ready(ready, "nope") is False)
-    check("is_transcript_ready tolerates an empty payload",
-          meetingscribe_source.is_transcript_ready({}, meeting_id) is False)
+        ready = status_payload({meeting_id: DONE})
+        check("is_transcript_ready reads a done job", meetingscribe_source.is_transcript_ready(ready, meeting_id) is True)
+        check("is_transcript_ready is False while processing",
+              meetingscribe_source.is_transcript_ready(status_payload({meeting_id: PROCESSING}), meeting_id) is False)
+        check("is_transcript_ready is False for an unknown id",
+              meetingscribe_source.is_transcript_ready(ready, "nope") is False)
+        check("is_transcript_ready tolerates an empty payload",
+              meetingscribe_source.is_transcript_ready({}, meeting_id) is False)
 
 
 # --- orchestrator: dedup, ordering, queue, undo -----------------------------
@@ -579,8 +843,8 @@ check("--phase defaults to both", parser.parse_args(["--watch"]).phase == "both"
 check("replaying a missing file degrades to an empty run", orchestrator.replay_meeting("/nonexistent/path.json") == [])
 check("--replay with no target defaults to the demo fixture",
       parser.parse_args(["--replay"]).replay == orchestrator.DEFAULT_REPLAY_TARGET)
-check("the demo fixture name is agi-living-room",
-      orchestrator.DEFAULT_REPLAY_TARGET == "agi-living-room")
+check("the demo fixture name is living-room-standup",
+      orchestrator.DEFAULT_REPLAY_TARGET == "living-room-standup")
 check("the demo fixture transcript exists on disk",
       (config.FIXTURES_DIR / f"{orchestrator.DEFAULT_REPLAY_TARGET}.jsonl").is_file())
 check("--replay still accepts an explicit target",
@@ -602,9 +866,9 @@ with tempfile.TemporaryDirectory() as directory:
         orchestrator.report_pipeline(
             mode="replay",
             pass_name="replay",
-            meeting_id="agi-living-room",
+            meeting_id="living-room-standup",
             meeting_title="MMM Standup",
-            watcher=orchestrator.watcher_status_transcript_ready("agi-living-room", replay=True),
+            watcher=orchestrator.watcher_status_transcript_ready("living-room-standup", replay=True),
             extraction=orchestrator.extraction_status_from_statements(
                 [type("S", (), {"kind": "decision", "segment_id": "s01"})(),
                  type("S", (), {"kind": "question", "segment_id": "s02"})()],
