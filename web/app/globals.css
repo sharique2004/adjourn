@@ -28,6 +28,11 @@
   --green: #4ad07e;
   --amber: #e3b341;
 
+  /* Beta CTA accent. Green so the signup reads as a "go" rather than another
+     amber link — happy to be overruled on that. */
+  --join-accent: #2ecc71;
+  --join-accent-ink: var(--bg);
+
   /* Kind accents — one hue per executor kind, none of them the two above. */
   --k-github-update: #b48cff;
   --k-linear-create: #7c8aff;
@@ -723,4 +728,22 @@ button:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* --- beta CTA ------------------------------------------------------------- */
+
+.btn-join {
+  border-color: var(--join-accent);
+  background: var(--join-accent);
+  color: var(--join-accent-ink);
+  font-weight: 600;
+}
+
+.btn-join:hover {
+  border-color: var(--join-accent);
+  filter: brightness(1.08);
+}
+
+.btn-join:focus-visible {
+  outline-color: var(--join-accent);
 }
