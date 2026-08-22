@@ -80,7 +80,16 @@ check("the Meetings blueprint mounted into the board app",
       application.config.get("ADJOURN_MEETINGS_MOUNTED") is True,
       str(application.config.get("ADJOURN_MEETINGS_MOUNT_ERROR", "")))
 
-board_markup = client.get("/").get_data(as_text=True)
+board_home = client.get("/").get_data(as_text=True)
+github_page = client.get("/d/github").get_data(as_text=True)
+linear_page = client.get("/d/linear").get_data(as_text=True)
+slack_page = client.get("/d/slack").get_data(as_text=True)
+email_page = client.get("/d/email").get_data(as_text=True)
+board_markup = linear_page + slack_page + github_page + email_page
+check("Follow-through home is a four-domain grid", 'class="domain-grid"' in board_home)
+check("the four workbenches are named", all(
+    title in board_home for title in ("Linear", "Slack", "GitHub", "Email")
+))
 for path in ("/", "/ledger", "/connections", f"/meeting/{dress_journal.MEETING_ID}"):
     response = client.get(path)
     check(f"GET {path} is 200", response.status_code == 200, str(response.status_code))
@@ -212,17 +221,17 @@ print("\n== dress finding 2: the pipeline panel does not eat the first screen ==
 # not sit above the card feed, and all four stages must be on screen without a
 # click.
 check("the pipeline panel is not a collapsed <details> any more",
-      "<details" not in board_markup)
+      "<details" not in github_page)
 check("the pipeline lives in the rail column, not above the cards",
-      'class="board-rail"' in board_markup
-      and board_markup.index('class="board-cards"') < board_markup.index('class="board-rail"'))
+      'class="board-rail"' in github_page
+      and github_page.index('class="board-cards"') < github_page.index('class="board-rail"'))
 check("all four stage headlines are visible without a click",
-      board_markup.count('class="rail-stage"') == 4)
+      github_page.count('class="rail-stage"') == 4)
 check("every stage is still named", all(
-    f'data-stage="{stage}"' in board_markup
+    f'data-stage="{stage}"' in github_page
     for stage in ("watcher", "extraction", "planner", "executors")
 ))
-check("the rail carries a live region", 'class="rail-live"' in board_markup)
+check("the rail carries a live region", 'class="rail-live"' in github_page)
 
 
 # =============================================================================
@@ -230,13 +239,13 @@ print("\n== dress finding 7: the undo button is labelled per its actual behaviou
 
 by_kind = {card["kind"]: card for card in cards if card["state"] != "cancelled"}
 check(
-    "a live card's button reads Undo",
-    by_kind["github_update"]["undo_label"] == "Undo",
+    "a live GitHub card's button reads Recall",
+    by_kind["github_update"]["undo_label"] == "Recall",
     by_kind["github_update"]["undo_label"],
 )
 check(
-    "a sim card whose send never happened reads Undo (sim)",
-    by_kind["linear_create"]["undo_label"] == "Undo (sim)",
+    "a sim Linear card reads Recall (sim)",
+    by_kind["linear_create"]["undo_label"] == "Recall (sim)",
     by_kind["linear_create"]["undo_label"],
 )
 check(
@@ -248,7 +257,7 @@ check(
     "every undo button carries a tooltip explaining which case it is",
     all(card["undo_title"] for card in cards if card["can_undo"]),
 )
-check("the tooltip reaches the markup", 'title="the transport was simulated' in board_markup)
+check("the tooltip reaches the markup", 'title="nothing was sent' in board_markup)
 
 
 # =============================================================================
@@ -404,7 +413,7 @@ check("an unknown meeting is 200, not 404", empty_page.status_code == 200)
 check("and it says restraint is a result",
       "That is a result, not a gap" in empty_page.get_data(as_text=True))
 detail = client.get(f"/meeting/{dress_journal.MEETING_ID}").get_data(as_text=True)
-check("the meeting page renders the same card macro", 'class="card"' in detail)
+check("the meeting page renders the four-domain grid", 'class="domain-grid"' in detail)
 check("the meeting page carries the undo token", f'data-undo-token="{TOKEN}"' in detail)
 
 

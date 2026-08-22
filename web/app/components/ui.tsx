@@ -29,7 +29,7 @@ export function ModeBadge({ mode, ok }: { mode: 'live' | 'sim'; ok: boolean }) {
     return (
       <span className="badge badge-failed">
         <span className="dot" aria-hidden />
-        failed
+        FAILED
       </span>
     );
   }
@@ -37,13 +37,13 @@ export function ModeBadge({ mode, ok }: { mode: 'live' | 'sim'; ok: boolean }) {
     return (
       <span className="badge badge-live" title="Fired against the real service">
         <span className="dot" aria-hidden />
-        live
+        LIVE
       </span>
     );
   }
   return (
     <span className="badge badge-sim" title="Simulated — no external write was made">
-      sim
+      SIM
     </span>
   );
 }
@@ -51,15 +51,21 @@ export function ModeBadge({ mode, ok }: { mode: 'live' | 'sim'; ok: boolean }) {
 export function ExecutionCard({ execution }: { execution: ExecutionRecord }) {
   const external = execution.url && !execution.url.startsWith('/');
   return (
-    <article className="card">
-      <div className="card-rail">
-        <KindChip kind={execution.kind} />
-        <ModeBadge mode={execution.mode} ok={execution.ok} />
-        <time className="card-time" dateTime={execution.fired_at}>
-          {shortTime(execution.fired_at)} UTC
-        </time>
-      </div>
+    <article
+      className="card"
+      data-kind={execution.kind}
+      data-state={execution.ok ? undefined : 'failed'}
+    >
+      <div className="card-rail" aria-hidden />
       <div className="card-body">
+        <header className="card-top">
+          <KindChip kind={execution.kind} />
+          <ModeBadge mode={execution.mode} ok={execution.ok} />
+          <span className="spacer" />
+          <time className="card-time" dateTime={execution.fired_at}>
+            {shortTime(execution.fired_at)} UTC
+          </time>
+        </header>
         <p className="card-summary">{execution.human_summary}</p>
         {execution.quote ? (
           <blockquote className="card-quote">
@@ -153,24 +159,27 @@ export function StatementRow({
 
 export function TopBar({ current }: { current: string }) {
   const links: Array<[string, string]> = [
-    ['/meetings', 'meetings'],
-    ['/board', 'follow-through'],
-    ['/ledger', 'ledger'],
+    ['/meetings', 'Meetings'],
+    ['/board', 'Follow-through'],
+    ['/ledger', 'Ledger'],
   ];
   return (
     <header className="topbar">
-      <div className="topbar-inner">
+      <nav className="viewbar" aria-label="Sections">
         <Link href="/" className="wordmark">
-          adjourn
+          Adjourn
         </Link>
-        <nav className="topnav">
-          {links.map(([href, label]) => (
-            <Link key={href} href={href} aria-current={href === current ? 'page' : undefined}>
-              {label}
-            </Link>
-          ))}
-        </nav>
-      </div>
+        {links.map(([href, label]) => (
+          <Link
+            key={href}
+            href={href}
+            className={href === current ? 'viewlink is-current' : 'viewlink'}
+            aria-current={href === current ? 'page' : undefined}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
     </header>
   );
 }
@@ -183,7 +192,11 @@ export function Footer({ source, reason }: { source: DataSource; reason?: string
   return (
     <footer className="footer">
       <div className="footer-inner">
-        <span>adjourn — the meeting is the to-do</span>
+        <span>Adjourn</span>
+        <span className="dot-sep" aria-hidden>
+          ·
+        </span>
+        <span>the meeting is the to-do</span>
         <span className="spacer" />
         {source === 'demo' ? (
           <span className="tag-demo" title={reason ? `cloud read: ${reason}` : undefined}>

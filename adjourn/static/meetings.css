@@ -75,9 +75,10 @@
 .searchfield {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 44px;
   padding: 11px 15px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--ink-raised);
   color: var(--text);
   font-family: inherit;
@@ -88,14 +89,15 @@
 }
 
 .searchfield::placeholder { color: var(--text-dimmer); }
-.searchfield:focus { outline: 2px solid var(--accent, #8b93a7); outline-offset: 2px; }
+.searchfield:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .searchfield::-webkit-search-cancel-button { filter: invert(1) opacity(0.45); }
 
 .searchgo {
   flex: 0 0 auto;
-  padding: 11px 18px;
+  min-height: 44px;
+  padding: 0 18px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-dim);
   font-family: inherit;
@@ -106,7 +108,7 @@
 }
 
 .searchgo:hover { color: var(--text); border-color: var(--text-dimmer); }
-.searchgo:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
+.searchgo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .searching {
   color: var(--text-dimmer);
@@ -171,17 +173,41 @@
  * and the one that matters, lost the argument to a grey pill. Unfilled and
  * lighter, they sit BEHIND the chip in the reading order without moving,
  * shrinking or being hidden. The information is identical; the emphasis is not. */
+.chip-status[data-status="done"] { display: none; }
+
 .badge-quiet {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
+  display: none;
+}
+
+.badge-quiet[title] {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--text-dimmer);
-  font-size: 10.5px;
-  font-weight: 550;
-  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+body[data-view="library"] .column-title,
+.mrow .external-id,
+.engine-base,
+.engine-detail,
+.enginebar ~ .source-note,
+.source-note[data-presentation] {
+  display: none;
+}
+
+.followthrough-label {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dimmer);
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* --- detail: follow-through cross-link ----------------------------------- */
@@ -192,27 +218,15 @@
   gap: 14px;
   margin: 0 0 30px;
   padding: 15px 18px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--ink-raised);
   color: var(--text);
   text-decoration: none;
 }
 
-.followthrough:hover { background: var(--ink-raised-2); border-color: var(--text-dimmer); }
-.followthrough:focus-visible { outline: 2px solid #8b93a7; outline-offset: 2px; }
-
-.followthrough-label {
-  flex: 0 0 auto;
-  padding: 3px 9px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  color: var(--text-dim);
-  font-size: 11.5px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
+.followthrough:hover { background: var(--ink-raised-2); border-color: var(--line-strong); }
+.followthrough:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .followthrough-copy { flex: 1 1 auto; font-size: 16px; color: var(--text-dim); }
 .followthrough-arrow { flex: 0 0 auto; color: var(--text-dimmer); font-size: 18px; }
@@ -249,7 +263,7 @@
 /* --- detail: summary ----------------------------------------------------- */
 
 .summary { margin-bottom: 34px; }
-.summary-card { --accent: #d6c8a6; }  /* the board's recap accent — same idea */
+.summary-card { --accent: #8b93a7; }
 
 .summary-tldr {
   margin: 11px 0 0;
@@ -576,10 +590,10 @@
   justify-content: center;
   /* 46px. The two controls that start and end a meeting in front of an audience
    * are not 38px-tall ghost buttons. */
-  min-height: 46px;
+  min-height: 44px;
   padding: 0 22px;
   border: 1px solid var(--line-strong);
-  border-radius: 11px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-dim);
   font-family: inherit;
@@ -670,7 +684,7 @@
   margin: 0 0 22px;
   padding: 10px 15px;
   border: 1px solid color-mix(in srgb, var(--hold) 38%, transparent);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--hold);
   font-size: 14px;
 }
@@ -691,12 +705,12 @@
  * looked abandoned rather than ready. Boxed, and a third of the height: it now
  * reads as the caption region standing by, which is what it is. */
 .captions .empty-state {
-  gap: 14px;
+  gap: 8px;
   margin: 14px 0 0;
-  padding: 34px 0 36px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.012);
+  padding: 20px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
 
 .captions .empty-line { font-size: 18px; }
@@ -720,17 +734,14 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 12px 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--live) 48%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--live) 12%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--live);
-  /* 13px, matching the LIVE badge on a card. The two are the same claim and
-   * they were two different sizes; the smaller one was 11px, which is under the
-   * legibility floor from the back of a room. */
   font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-weight: 560;
+  letter-spacing: 0.08em;
 }
 
 .listening[hidden] { display: none; }
@@ -902,10 +913,11 @@
   align-items: center;
   gap: 12px;
   margin: 0 0 14px;
-  padding: 11px 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
-  background: var(--ink-raised-2);
+  padding: 0 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
 }
 
 .enginebar[hidden] { display: none; }

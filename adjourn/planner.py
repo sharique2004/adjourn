@@ -654,9 +654,10 @@ def build_github_update(
     # stays in the comment body where it belongs.
     headline = what_changed if (verdict and verdict.get("conflict")) else claim
     preview = f"Comment on #{issue_number}: {_one_line(headline or claim, 70)}"
-    return Action(
-        kind="github_update",
-        payload={
+    from . import work_brief
+
+    payload = work_brief.attach(
+        {
             "issue_number": int(issue_number),
             "repo": config.github_repo(),
             "before": before,
@@ -667,6 +668,11 @@ def build_github_update(
             "labels": labels,
             "human_preview": preview,
         },
+        statement,
+    )
+    return Action(
+        kind="github_update",
+        payload=payload,
         # MEETING + ISSUE. Nothing else, and the two fields that used to be here
         # were each removed after they fired a second public comment on the same
         # issue from the same standup:
@@ -731,9 +737,10 @@ def build_linear_create(
     if not title:
         return None
     person = _entity_reference(statement, "person")
-    return Action(
-        kind="linear_create",
-        payload={
+    from . import work_brief
+
+    payload = work_brief.attach(
+        {
             "title": title,
             "team_key": config.read_setting("LINEAR_TEAM_KEY", DEFAULT_LINEAR_TEAM_KEY),
             "assignee_name": _one_line(person) if person else "",
@@ -741,6 +748,11 @@ def build_linear_create(
             "meeting_title": _one_line(meeting.get("title", "")),
             "human_preview": f"Linear: create ticket “{_one_line(title, 60)}”",
         },
+        statement,
+    )
+    return Action(
+        kind="linear_create",
+        payload=payload,
         # Meeting-scoped, like every other kind. An unscoped key put this action
         # in a GLOBAL namespace: has_memory_fired() matches the bare key, so once
         # any meeting had filed the webhook ticket, every later meeting's identical
@@ -825,9 +837,10 @@ def build_linear_move(
             f"{_one_line(spoken, 60)!r} says it moved"
         )
         return None  # the table says it has not moved far enough to move the ticket
-    return Action(
-        kind="linear_move",
-        payload={
+    from . import work_brief
+
+    payload = work_brief.attach(
+        {
             "linear_identifier": identifier,
             "target_state": target_state,
             "percent": percent,
@@ -835,6 +848,13 @@ def build_linear_move(
             "meeting_title": _one_line(meeting.get("title", "")),
             "human_preview": f"Linear: {identifier} -> {target_state}",
         },
+        statement,
+    )
+    if not payload.get("work_status"):
+        payload["work_status"] = target_state
+    return Action(
+        kind="linear_move",
+        payload=payload,
         dedup_key=build_dedup_key("linear_move", meeting.get("meeting_id", ""), identifier),
     )
 
@@ -858,13 +878,18 @@ def build_pull_request_stub(
         return None
     issue_number = resolve_issue_number(statement, memory)
     title = f"WIP: {topic}"
-    payload = {
-        "repo": config.github_repo(),
-        "topic": topic,
-        "title": title,
-        "meeting_title": _one_line(meeting.get("title", "")),
-        "human_preview": f"Draft PR: {title}",
-    }
+    from . import work_brief
+
+    payload = work_brief.attach(
+        {
+            "repo": config.github_repo(),
+            "topic": topic,
+            "title": title,
+            "meeting_title": _one_line(meeting.get("title", "")),
+            "human_preview": f"Draft PR: {title}",
+        },
+        statement,
+    )
     if issue_number:
         payload["issue_number"] = int(issue_number)
     return Action(
@@ -885,19 +910,14 @@ _PR_REFERENCE_PHRASES = (
     "pr for", "on the diff", "in review", "under review", "review on",
 )
 
-# A filename spoken out loud ("it's in join.css") narrows the diff search. Only
-# an extension we would actually find in a PR, so "e.g." and "vs." do not match.
-_FILENAME_PATTERN = re.compile(
-    r"\b([\w./-]+\.(?:css|scss|js|jsx|ts|tsx|py|rb|go|rs|java|html|json|ya?ml|md|toml))\b",
-    re.IGNORECASE,
-)
-
-
 def _spoken_file_hint(statement: Statement) -> str:
     """A filename the room actually said, or "". Pure."""
-    spoken = f"{getattr(statement, 'quote', '')} {getattr(statement, 'claim', '')}"
-    match = _FILENAME_PATTERN.search(spoken)
-    return match.group(1) if match else ""
+    from . import work_brief
+
+    files = work_brief.spoken_files(
+        f"{getattr(statement, 'quote', '')} {getattr(statement, 'claim', '')}"
+    )
+    return files[0] if files else ""
 
 
 def mentions_pull_request_under_review(statement: Statement) -> bool:

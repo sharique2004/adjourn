@@ -274,52 +274,55 @@ def render_recap_html(payload: dict) -> str:
 <style>
   :root {{
     --ink: #0a0b0d;
-    --panel: #121418;
-    --line: #232830;
-    --text: #e6e8ec;
-    --muted: #8b93a1;
-    --live: #35d07f;
-    --sim: #f0a02a;
-    --failed: #ef5a5a;
+    --panel: #131416;
+    --line: rgba(255, 255, 255, 0.08);
+    --text: #ecece8;
+    --muted: #8b8f98;
+    --live: #4ade80;
+    --sim: #b9c0cb;
+    --failed: #f0616d;
     --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
   }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0; padding: 3rem 1.25rem 5rem;
     background: var(--ink); color: var(--text);
-    font-family: var(--mono); font-size: 14px; line-height: 1.65;
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }}
   main {{ max-width: 60rem; margin: 0 auto; }}
   header.meeting {{ border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }}
-  header.meeting h1 {{ font-size: 1.6rem; margin: 0 0 .4rem; letter-spacing: -.02em; }}
-  .meta {{ color: var(--muted); font-size: .8rem; }}
+  header.meeting h1 {{ font-size: 1.75rem; margin: 0 0 .4rem; letter-spacing: -.02em; font-weight: 600; }}
+  .meta {{ color: var(--muted); font-family: var(--mono); font-size: .8rem; }}
   .totals {{ margin-top: 1rem; display: flex; flex-wrap: wrap; gap: .5rem; }}
-  .total {{ border: 1px solid var(--line); border-radius: 999px; padding: .15rem .7rem; font-size: .75rem; color: var(--muted); }}
+  .total {{ border: 0; border-radius: 0; padding: 0; font-size: .8rem; color: var(--muted); }}
   .total b {{ color: var(--text); font-weight: 600; }}
   h2 {{ font-size: .8rem; text-transform: uppercase; letter-spacing: .14em; color: var(--muted);
         margin: 3rem 0 1rem; font-weight: 500; }}
-  .card {{ background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--live);
-           border-radius: 6px; padding: 1rem 1.15rem; margin-bottom: .85rem; }}
-  .card.failed {{ border-left-color: var(--failed); }}
-  .card.undone {{ opacity: .55; border-left-color: var(--muted); }}
+  .card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+           padding: 1rem 1.15rem; margin-bottom: .85rem; box-shadow: inset 4px 0 0 var(--live); }}
+  .card.failed {{ box-shadow: inset 4px 0 0 var(--failed); }}
+  .card.undone {{ opacity: .55; box-shadow: inset 4px 0 0 var(--muted); }}
   .card.undone .summary {{ text-decoration: line-through; text-decoration-thickness: 1px; }}
   .badge.undone {{ color: var(--muted); }}
   .link.dead {{ color: var(--muted); font-size: .78rem; word-break: break-all; }}
   .gone {{ font-style: italic; }}
   .card-head {{ display: flex; align-items: center; gap: .55rem; margin-bottom: .5rem; }}
   .kind {{ font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }}
-  .badge {{ font-size: .65rem; letter-spacing: .1em; padding: .05rem .45rem; border-radius: 3px;
-            border: 1px solid currentColor; }}
+  .badge {{ font-size: .7rem; letter-spacing: .08em; padding: 0; border-radius: 0;
+            border: 0; }}
   .badge.live {{ color: var(--live); }}
   .badge.sim {{ color: var(--sim); }}
   .badge.failed {{ color: var(--failed); }}
-  .summary {{ margin: 0; font-size: .95rem; }}
+  .summary {{ margin: 0; font-size: 1.05rem; font-weight: 560; letter-spacing: -.015em; }}
   .link a {{ color: var(--muted); font-size: .78rem; text-decoration: none; word-break: break-all; }}
   .link a:hover {{ color: var(--text); }}
-  blockquote.quote {{ margin: .8rem 0 0; padding: .55rem .85rem; background: #0d0f13;
-                      border-left: 2px solid var(--line); border-radius: 3px; font-size: .85rem; }}
-  .stamp {{ color: var(--muted); margin-right: .5rem; }}
+  blockquote.quote {{ margin: .8rem 0 0; padding: 0; background: transparent;
+                      border: 0; font-family: var(--serif); font-style: italic;
+                      font-size: .95rem; color: var(--muted); }}
+  .stamp {{ color: var(--muted); margin-right: .5rem; font-family: var(--mono); font-size: .75rem; }}
   .who {{ color: var(--live); margin-right: .5rem; }}
   .card.failed .who {{ color: var(--failed); }}
   .person {{ border-top: 1px solid var(--line); padding-top: 1rem; margin-top: 1rem; }}
@@ -330,7 +333,7 @@ def render_recap_html(payload: dict) -> str:
   .tag {{ color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
           margin-right: .5rem; }}
   .due {{ color: var(--sim); }}
-  .empty {{ color: var(--muted); }}
+  .empty {{ color: var(--muted); font-family: var(--serif); font-style: italic; }}
   footer {{ margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
             color: var(--muted); font-size: .75rem; }}
 </style>

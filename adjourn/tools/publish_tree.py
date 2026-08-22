@@ -38,9 +38,10 @@ from .. import config, secrets_store
 PACKAGE_DIRECTORIES = ("executors", "tools", "fixtures", "tests", "templates", "static")
 PACKAGE_FILES = (
     "__init__.py", "board_server.py", "cloud_mirror.py", "config.py",
-    "extraction.py", "meetings_ui.py", "meetingscribe_source.py", "memory_store.py",
+    "extraction.py", "fixture_library.py", "meetings_ui.py",
+    "meetingscribe_source.py", "memory_store.py",
     "orchestrator.py", "planner.py", "prompts.py", "reset_demo.py", "results.py",
-    "secrets_store.py", "seed_memory.py", "watcher.py",
+    "secrets_store.py", "seed_memory.py", "watcher.py", "work_brief.py",
     "requirements.txt", "README.md", "DEMO.md", ".gitignore",
 )
 # DEMO.md ships. It is a stage runbook, and half the comments in the package

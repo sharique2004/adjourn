@@ -973,6 +973,70 @@ def send_held_action(
     return result
 
 
+RECALLABLE_KINDS: frozenset[str] = frozenset({
+    "github_update",
+    "linear_create",
+    "linear_move",
+    "pull_request_stub",
+    "pr_review_suggestion",
+})
+
+
+def resend_execution(
+    dedup_key: str,
+    *,
+    journal_path: Path | None = None,
+    memory=None,
+) -> results.ExecutorResult | None:
+    """Fire a recalled Linear/GitHub action again. None if nothing is waiting.
+
+    Recall archives or deletes the remote thing. Send again creates it fresh from
+    the payload the first fire stored on the journal. Slack and email do not
+    come through here — they wait in Ready to send.
+    """
+    key = (dedup_key or "").strip()
+    if not key:
+        return None
+    if key not in results.read_undone_dedup_keys(path=journal_path):
+        return None
+    generations = [
+        record
+        for record in results.read_executions(path=journal_path)
+        if record.get("dedup_key") == key
+        and record.get("record_type", results.RECORD_TYPE_EXECUTION)
+        == results.RECORD_TYPE_EXECUTION
+        and record.get("ok")
+        and isinstance(record.get("action_payload"), dict)
+        and record.get("action_payload")
+    ]
+    if not generations:
+        return None
+    record = generations[-1]
+    kind = str(record.get("kind") or "")
+    if kind not in RECALLABLE_KINDS:
+        return None
+    action = Action(
+        kind=kind,
+        payload=dict(record.get("action_payload") or {}),
+        dedup_key=key,
+        regret_window_s=0,
+        hold_for_send=False,
+        quote=str(record.get("quote") or ""),
+        speaker=str(record.get("speaker") or ""),
+        meeting_id=str(record.get("meeting_id") or ""),
+        source="resend",
+    )
+    result = fire_action(
+        action,
+        meeting_title=str(action.payload.get("meeting_title") or ""),
+        memory=memory,
+        ignore_regret_window=True,
+    )
+    if result is not None:
+        refresh_recap_after_late_action(action.meeting_id, memory)
+    return result
+
+
 def clear_pending_actions(path: Path | None = None) -> None:
     """Empty the pending file. Used by the demo reset."""
     write_pending_actions([], path=path)
@@ -1527,7 +1591,11 @@ def fire_action(
     results.append_execution(
         result,
         action.dedup_key,
-        extra={"source": action.source, "segment_id": action.segment_id},
+        extra={
+            "source": action.source,
+            "segment_id": action.segment_id,
+            "action_payload": dict(action.payload or {}),
+        },
     )
     mirror_execution_in_background(result, action.dedup_key)
     mark_pending_action_fired(action.dedup_key)

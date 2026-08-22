@@ -369,6 +369,11 @@ def build_comment_markdown(action: Action, previous_state: str, target_state: st
     lines = [f"Moved **{previous_state or 'its previous state'} → {target_state}** by Adjourn."]
     if quote:
         lines += ["", f"> **{speaker}:** {quote}"]
+    from .. import work_brief
+
+    brief = work_brief.as_markdown(action.payload)
+    if brief:
+        lines += ["", brief.rstrip()]
     # Precise, and directly under the quote it is describing. See the note in
     # github_update_executor's footer: the absolute claim is false the moment a
     # verbatim sentence is printed on somebody else's server.

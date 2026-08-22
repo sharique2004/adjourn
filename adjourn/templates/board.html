@@ -73,6 +73,16 @@
 
     <h2 class="headline">{{ card.human_summary }}</h2>
 
+    {% if card.work_status or card.files or card.branch %}
+    <ul class="work-spec">
+      {% if card.work_status %}<li><span>Status</span> <b>{{ card.work_status }}</b></li>{% endif %}
+      {% if card.branch %}<li><span>Branch</span> <code>{{ card.branch }}</code></li>{% endif %}
+      {% if card.files %}
+      <li><span>Files</span> {% for name in card.files %}<code>{{ name }}</code>{% endfor %}</li>
+      {% endif %}
+    </ul>
+    {% endif %}
+
     {# THE TRACE. The quote is the evidence for the card, so it is a link back to
        the transcript it came out of — the beat is "this is not a summary, here is
        the line that caused it". When there is no meeting to open (a fabricated
@@ -98,7 +108,10 @@
       {% endif %}
       <div class="card-end">
         <span class="elapsed">{{ card.elapsed }}</span>
-        {% if card.can_undo %}
+        {% if card.can_resend %}
+          <button class="send-now" type="button" data-resend="{{ card.id }}"
+                  data-send-label="Send again">Send again</button>
+        {% elif card.can_undo %}
           <button class="undo" type="button" data-undo="{{ card.id }}"
                   title="{{ card.undo_title }}"
                   data-undo-label="{{ card.undo_label }}">{{ card.undo_label }}</button>
@@ -193,7 +206,7 @@
     {# FOLLOW-THROUGH IS CROSS-MEETING. The stream below is grouped by meeting,
        so this title is the page, not the latest recording — otherwise a card
        from Tuesday opened under Wednesday's name. #}
-    <h1 class="meeting-title">Follow-through</h1>
+    <h1 class="meeting-title">{% if state.domain %}{{ state.domain.title }}{% else %}Follow-through{% endif %}</h1>
     <p class="meeting-meta">
       {% if state.meeting.duration %}<span class="meta-item">{{ state.meeting.duration }}</span>{% endif %}
       <span class="meta-item totals" data-totals>{{ state.totals_line }}</span>
@@ -426,7 +439,7 @@
 {%- endmacro -%}
 
 {% macro meeting_block(group) -%}
-<section class="meeting-block" data-meeting="{{ group.meeting_id }}"
+<section class="meeting-block" id="m-{{ group.meeting_id }}" data-meeting="{{ group.meeting_id }}"
          aria-label="{{ group.display_title }}">
   <header class="meeting-block-head">
     {% if group.href %}
@@ -440,6 +453,9 @@
       <span>{{ group.pending_count }} to send</span>
       {% endif %}
       <span>{{ group.executed_count }} executed</span>
+      {% if group.meeting_id %}
+      <a class="meeting-recap" href="/recap/{{ group.meeting_id }}">Recap</a>
+      {% endif %}
     </p>
   </header>
   {% if group.pending %}{{ pending_column(group.pending) }}{% endif %}
@@ -447,18 +463,35 @@
 </section>
 {%- endmacro -%}
 
-{% macro followthrough_column(groups, last_adjourned=none) -%}
+{% macro followthrough_column(groups, last_adjourned=none, domain=none) -%}
+{% if domain %}
+<p class="domain-lede">{{ domain.lede }}</p>
+<p class="domain-back"><a href="/">All four</a></p>
+{% endif %}
 {% if groups %}
 <div class="followthrough-stream" aria-label="Follow-through by meeting">
   {% for group in groups %}{{ meeting_block(group) }}{% endfor %}
 </div>
 {% else %}
-{% if last_adjourned %}{{ last_adjourned_panel(last_adjourned) }}{% endif %}
-<section class="empty-state{{ ' is-quiet' if last_adjourned else '' }}" aria-label="No actions yet">
+{% if last_adjourned and not domain %}{{ last_adjourned_panel(last_adjourned) }}{% endif %}
+<section class="empty-state{{ ' is-quiet' if last_adjourned and not domain else '' }}" aria-label="No actions yet">
   <span class="empty-pulse" aria-hidden="true"></span>
-  <p class="empty-line">{{ empty_state_line }}</p>
+  <p class="empty-line">{{ domain.empty if domain else empty_state_line }}</p>
 </section>
 {% endif %}
+{%- endmacro -%}
+
+{% macro domain_grid(domains, last_adjourned=none) -%}
+<section class="domain-grid" aria-label="Follow-through">
+  {% for tile in domains %}
+  <a class="domain-tile{% if tile.has_work %} has-work{% endif %}" href="{{ tile.href }}" data-domain="{{ tile.slug }}">
+    <h2>{{ tile.title }}</h2>
+    <p class="domain-status">{{ tile.status }}</p>
+    <p class="domain-copy">{{ tile.lede }}</p>
+  </a>
+  {% endfor %}
+</section>
+{% if last_adjourned %}{{ last_adjourned_panel(last_adjourned) }}{% endif %}
 {%- endmacro -%}
 
 {% macro card_column(cards, last_adjourned=none) -%}
@@ -544,7 +577,7 @@
   <title>{% if view == 'ledger' %}Ledger · Adjourn{% elif state.meeting.display_title %}{{ state.meeting.display_title }} · Adjourn{% else %}Adjourn{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='board.css') }}">
 </head>
-<body data-view="{{ view }}" data-version="{{ version }}" data-undo-token="{{ undo_token }}">
+<body data-view="{{ view }}" data-domain="{{ state.domain.slug if state.domain else '' }}" data-version="{{ version }}" data-undo-token="{{ undo_token }}">
 
 <header class="masthead" data-header>
   {% if view == 'ledger' %}{{ ledger_header(ledger) }}{% else %}{{ board_header(state) }}{% endif %}
@@ -583,11 +616,13 @@
 <main class="board board-split">
   <div class="board-cards">
     <div id="pending" hidden></div>
-    <div id="cards">{{ followthrough_column(state.meeting_groups, state.last_adjourned) }}</div>
+    <div id="cards">{% if state.domain %}{{ followthrough_column(state.meeting_groups, none, state.domain) }}{% else %}{{ domain_grid(state.domains, state.last_adjourned) }}{% endif %}</div>
   </div>
+  {% if state.domain %}
   <aside class="board-rail" id="guts" data-guts aria-label="What the pipeline is doing">
     {{ guts_panel(state.pipeline) }}
   </aside>
+  {% endif %}
 </main>
 {% endif %}
 

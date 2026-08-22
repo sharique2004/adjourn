@@ -58,7 +58,7 @@ export default async function MeetingsPage() {
                 </span>
               </div>
               {kinds.length > 0 ? (
-                <div className="cards" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div className="chip-row">
                   {kinds.map((kind) => (
                     <KindChip kind={kind} key={kind} />
                   ))}

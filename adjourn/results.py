@@ -330,14 +330,22 @@ def read_undone_dedup_keys(
     meeting_id: str | None = None,
     path: Path | None = None,
 ) -> set[str]:
-    """Dedup keys that were later undone — the board strikes these through."""
-    return {
-        record.get("dedup_key", "")
-        for record in read_executions(meeting_id, path)
-        if record.get("record_type") == RECORD_TYPE_UNDO
-        and record.get("undo_ok")
-        and record.get("dedup_key")
-    }
+    """Dedup keys whose latest write is a successful undo.
+
+    A later execution of the same key (Send again after Recall) clears the
+    strike-through. History stays append-only; the board reads the tail.
+    """
+    latest: dict[str, str] = {}
+    for record in read_executions(meeting_id, path):
+        key = str(record.get("dedup_key") or "")
+        if not key:
+            continue
+        record_type = record.get("record_type", RECORD_TYPE_EXECUTION)
+        if record_type == RECORD_TYPE_UNDO and record.get("undo_ok"):
+            latest[key] = "undone"
+        elif record_type == RECORD_TYPE_EXECUTION and record.get("ok"):
+            latest[key] = "live"
+    return {key for key, state in latest.items() if state == "undone"}
 
 
 def read_records_since(

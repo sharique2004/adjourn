@@ -189,6 +189,35 @@ check("input names the team", "ENG" in issue_input["teamId"])
 check("description carries the verbatim quote", "**Priya:** Let's move the cache layer" in issue_input["description"])
 check("undo of a sim ticket is honest-true", linear_create_executor.undo(linear_result) is True)
 
+print("\n== work brief: files, branch, and status from what was said ==")
+from adjourn import work_brief  # noqa: E402
+from adjourn.extraction import Statement  # noqa: E402
+
+spoken = Statement(
+    segment_id="s1", speaker="Priya", topic="join button",
+    claim="The green in join.css on priya/join-button is in review.",
+    kind="progress_report",
+    quote="Fix join.css on priya/join-button, it's in review.",
+)
+brief = work_brief.from_statement(spoken)
+check("a spoken filename is captured", brief["files"] == ["join.css"], str(brief["files"]))
+check("a spoken branch is captured", brief["branch"] == "priya/join-button", brief["branch"])
+check("in review wins as status", brief["work_status"] == "In Review", brief["work_status"])
+check("a github.com URL is not a branch",
+      work_brief.spoken_branch("see github.com/sharique2004/adjourn") == "")
+ticket = linear_create_executor.build_description_markdown(
+    Action(
+        kind="linear_create",
+        payload={"meeting_title": "Standup", "files": ["join.css"],
+                 "branch": "priya/join-button", "work_status": "In Review"},
+        quote="Fix join.css on priya/join-button, it's in review.",
+        speaker="Priya",
+    )
+)
+check("the Linear ticket names the files", "`join.css`" in ticket)
+check("the Linear ticket names the branch", "`priya/join-button`" in ticket)
+check("the Linear ticket names the status", "In Review" in ticket)
+
 print("\n== linear_move: the percent table is deterministic, not a model ==")
 table = [
     (5, "", None),

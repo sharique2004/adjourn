@@ -118,6 +118,11 @@ def build_description_markdown(action: Action) -> str:
     lines = [f"Filed by Adjourn from **{meeting}**.", ""]
     if quote:
         lines += [f"> **{speaker}:** {quote}", ""]
+    from .. import work_brief
+
+    brief = work_brief.as_markdown(payload)
+    if brief:
+        lines += [brief]
     lines += [
         "---",
         "",
@@ -309,6 +314,13 @@ def execute(action: Action) -> results.ExecutorResult:
             assignee_id = resolve_assignee_id(assignee_name, api_key)
             if assignee_id:
                 issue_input["assigneeId"] = assignee_id
+        work_status = _one_line(payload.get("work_status", ""))
+        if work_status and "stateId" not in issue_input:
+            from .linear_move_executor import resolve_state_id
+
+            state_id = resolve_state_id(team_id, work_status, api_key)
+            if state_id:
+                issue_input["stateId"] = state_id
         created = _create_issue_live(issue_input, api_key)
     except Exception as error:  # noqa: BLE001 — a failed API call is a red card, not a crash
         return results.ExecutorResult.failed(

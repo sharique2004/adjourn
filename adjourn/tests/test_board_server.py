@@ -122,6 +122,11 @@ check("a failed action offers no undo", not by_kind["email_send"]["can_undo"])
 check("a failed action says why", "never landed" in by_kind["email_send"]["undo_note"])
 check("a sim slack message is undoable", by_kind["slack_send"]["can_undo"])
 check("a github comment is undoable", by_kind["github_update"]["can_undo"])
+check("a github comment is recalled, not undone",
+      by_kind["github_update"]["undo_label"] == "Recall (sim)",
+      by_kind["github_update"]["undo_label"])
+check("four workbenches are described",
+      [tile["slug"] for tile in state["domains"]] == ["linear", "slack", "github", "email"])
 check(
     "no fabricated row claims a live remote transport",
     all(
@@ -219,32 +224,58 @@ markup = page.get_data(as_text=True)
 check("page is a complete document", markup.startswith("<!doctype html>") and "</html>" in markup)
 check("quiet header line is on the page", board_server.QUIET_HEADER_LINE in markup)
 check("the page is named Follow-through", ">Follow-through</h1>" in markup)
-check("work is grouped under a meeting header", 'class="meeting-block"' in markup)
-check("the meeting header names the meeting", 'class="meeting-block-title"' in markup)
+check("home is a four-domain grid", 'class="domain-grid"' in markup)
+check("the four workbenches are on the home", all(
+    f'data-domain="{slug}"' in markup for slug in ("linear", "slack", "github", "email")
+))
+check("home does not dump every card", 'class="meeting-block"' not in markup)
 check("totals line rendered", state["totals_line"] in markup)
 check("stylesheet linked", "/static/board.css" in markup)
 check("script linked", "/static/board.js" in markup)
+check("ledger link present", 'href="/ledger"' in markup)
+check("no stray select controls", "<select" not in markup)
+
+github_page = client.get("/d/github")
+check("GET /d/github is 200", github_page.status_code == 200)
+github_markup = github_page.get_data(as_text=True)
+check("a domain page is named for that workbench", ">GitHub</h1>" in github_markup)
+check("work is grouped under a meeting header", 'class="meeting-block"' in github_markup)
+check("the meeting header names the meeting", 'class="meeting-block-title"' in github_markup)
+check("github cards render on the GitHub page", 'data-kind="github_update"' in github_markup)
+check("sim badge present", "badge-sim" in github_markup and ">SIM<" in github_markup)
+check("a local recap is still live", by_kind["recap_page"]["mode"] == "live")
+check("quote is in the serif blockquote", 'class="quote"' in github_markup)
+check("speaker attributed", "Sharique" in github_markup)
+check("click-through url rendered", "github.com/sharique2004/adjourn/issues/14" in github_markup)
+check("guts panel is on a domain page", 'class="guts"' in github_markup and "Watcher" in github_markup)
+check("guts panel names every stage",
+      "Extraction" in github_markup and "Planner" in github_markup and "Executors" in github_markup)
+check("guts panel is not a second site — same document",
+      github_markup.count("<!doctype html>") == 1)
+check("Recall is the word on a GitHub card", "Recall" in github_markup)
+
+slack_markup = client.get("/d/slack").get_data(as_text=True)
+check("Ready to send is on Slack", "Ready to send" in slack_markup)
+check("draft editor rendered", 'class="compose-body"' in slack_markup and 'class="send-now"' in slack_markup)
+
+email_markup = client.get("/d/email").get_data(as_text=True)
+check("failed badge present", "badge-failed" in email_markup)
+
+linear_markup = client.get("/d/linear").get_data(as_text=True)
+check("Linear cards render on the Linear page", 'data-kind="linear_create"' in linear_markup)
+check("verbatim quote present", "just needs review" in linear_markup)
 
 for kind in planner.ACTION_KINDS:
-    check(f"card rendered for {kind}", f'data-kind="{kind}"' in markup)
+    if kind in board_server.KIND_TO_DOMAIN:
+        haystack = {
+            "linear": linear_markup,
+            "slack": slack_markup,
+            "github": github_markup,
+            "email": email_markup,
+        }[board_server.KIND_TO_DOMAIN[kind]]
+        check(f"card rendered for {kind}", f'data-kind="{kind}"' in haystack)
 
-check("live badge present", "badge-live" in markup and ">LIVE<" in markup)
-check("sim badge present", "badge-sim" in markup and ">SIM<" in markup)
-check("failed badge present", "badge-failed" in markup)
-check("verbatim quote present", "just needs review" in markup)
-check("quote is in the serif blockquote", 'class="quote"' in markup)
-check("speaker attributed", "Priya" in markup)
-check("click-through url rendered", "github.com/sharique2004/adjourn/issues/14" in markup)
-check("Ready to send is on the board", "Ready to send" in markup)
-check("draft editor rendered", 'class="compose-body"' in markup and 'class="send-now"' in markup)
-check("undo buttons rendered", markup.count("data-undo=") >= 3)
-check("no stray select controls", "<select" not in markup)
-check("ledger link present", 'href="/ledger"' in markup)
-check("guts panel is on the board", 'class="guts"' in markup and "Watcher" in markup)
-check("guts panel names every stage",
-      "Extraction" in markup and "Planner" in markup and "Executors" in markup)
-check("guts panel is not a second site — same document",
-      markup.count("<!doctype html>") == 1)
+check("undo buttons rendered", github_markup.count("data-undo=") >= 1)
 
 assets = client.get("/static/board.css")
 check("stylesheet is served", assets.status_code == 200 and b"--ink" in assets.data)
@@ -256,11 +287,16 @@ check("script carries no card markup", b"<article" not in script.data)
 print("\n== fragment endpoint ==")
 fragment = client.get("/api/fragment").get_json()
 check("fragment carries a version", bool(fragment["version"]))
-check("fragment carries cards html", 'data-kind="slack_send"' in fragment["cards_html"])
-check("fragment carries pending html", "compose-body" in fragment["cards_html"])
+check("home fragment is the four-domain grid", "domain-tile" in fragment["cards_html"])
+check("home fragment does not dump Slack cards", 'data-kind="slack_send"' not in fragment["cards_html"])
 check("fragment carries header html", board_server.QUIET_HEADER_LINE in fragment["header_html"])
-check("fragment carries guts html", 'class="guts"' in fragment["guts_html"] and "Watcher" in fragment["guts_html"])
-check("fragment card html matches the page", 'class="card"' in fragment["cards_html"])
+check("home fragment has no guts column", fragment["guts_html"] == "")
+
+slack_fragment = client.get("/api/fragment?domain=slack").get_json()
+check("Slack fragment carries cards html", 'data-kind="slack_send"' in slack_fragment["cards_html"])
+check("Slack fragment carries pending html", "compose-body" in slack_fragment["cards_html"])
+check("Slack fragment carries guts html", 'class="guts"' in slack_fragment["guts_html"] and "Watcher" in slack_fragment["guts_html"])
+check("fragment card html matches the page", 'class="card"' in slack_fragment["cards_html"])
 
 unchanged = client.get(f"/api/fragment?version={fragment['version']}").get_json()
 check("unchanged version short-circuits", unchanged["unchanged"] is True)
@@ -440,7 +476,7 @@ populated = orchestrator.PipelineStatus(
 )
 before_pipe = board_server.compute_version(board_server.load_board_state())
 orchestrator.write_pipeline_status(populated, path=_SANDBOX / "pipeline.json")
-guts_page = client.get("/")
+guts_page = client.get("/d/github")
 guts_markup = guts_page.get_data(as_text=True)
 check("populated pipeline still 200", guts_page.status_code == 200)
 check("guts panel shows replay badge", "REPLAY" in guts_markup)
@@ -467,9 +503,9 @@ os.environ["ADJOURN_BOARD_PIPELINE"] = str(empty_directory / "pipeline.json")
 empty_page = client.get("/")
 empty_markup = empty_page.get_data(as_text=True)
 check("empty board is still 200", empty_page.status_code == 200)
-check("empty state line rendered", board_server.EMPTY_STATE_LINE in empty_markup)
-check("empty state has the pulse", "empty-pulse" in empty_markup)
-check("empty board renders no cards", 'class="card"' not in empty_markup)
+check("empty follow-through is still the four-domain grid", 'class="domain-grid"' in empty_markup)
+check("empty tiles say nothing yet", empty_markup.count("Nothing yet") >= 4)
+check("empty board renders no action cards", 'data-key=' not in empty_markup)
 check("empty ledger is 200", client.get("/ledger").status_code == 200)
 
 
@@ -482,7 +518,7 @@ broken.write_text(
 )
 resilient = client.get("/")
 check("board survives a half-written line", resilient.status_code == 200)
-check("the good record still renders", "fine" in resilient.get_data(as_text=True))
+check("the good record still renders", "fine" in client.get("/d/slack").get_data(as_text=True))
 
 
 # =============================================================================
@@ -572,7 +608,7 @@ check("batch progress is reported as a line and a fraction",
       and streamed["extraction"]["batch_fraction"] == 0.75,
       str(streamed["extraction"]))
 
-rail_markup = client.get("/").get_data(as_text=True)
+rail_markup = client.get("/d/github").get_data(as_text=True)
 check("the rail is beside the cards, not above them",
       'class="board-rail"' in rail_markup
       and rail_markup.index('class="board-cards"') < rail_markup.index('class="board-rail"'))
@@ -653,10 +689,8 @@ check("nothing is fabricated — the count is the archive's own",
 blank_markup = client.get("/").get_data(as_text=True)
 check("the idle board renders a Last adjourned header",
       "Last adjourned" in blank_markup and 'class="lastadj"' in blank_markup)
-check("the waiting pulse is still there under it",
-      "empty-pulse" in blank_markup and board_server.EMPTY_STATE_LINE in blank_markup)
-check("the pulse is quieted when there are receipts above it",
-      "empty-state is-quiet" in blank_markup)
+check("the four workbenches sit above the receipts",
+      'class="domain-grid"' in blank_markup)
 check("the fragment carries it too, so a poll cannot blank the page",
       "Last adjourned" in client.get("/api/fragment").get_json()["cards_html"])
 
@@ -849,7 +883,7 @@ check("every batch boundary changes the fragment version, so the 1s poll sees it
 check("a hand-written pipeline.json flips the rail off the derived fallback",
       client.get("/api/pipeline").get_json()["feed_source"] == "orchestrator")
 
-_advance_markup = client.get("/").get_data(as_text=True)
+_advance_markup = client.get("/d/github").get_data(as_text=True)
 check("the rendered bar width matches the reported fraction",
       "width: 100.0%" in _advance_markup, "the bar must be server-rendered, not JS-only")
 check("the rail names the batch on screen, not only in the API",
@@ -887,7 +921,7 @@ check(
 # render at all — a progress bar with nothing behind it is a progress bar that lies.
 _write_batch(0, 0, list(_rows))
 check("no batch total means no bar",
-      'class="rail-batch"' not in client.get("/").get_data(as_text=True))
+      'class="rail-batch"' not in client.get("/d/github").get_data(as_text=True))
 check("...but the streamed rows still win over the derived ones",
       client.get("/api/pipeline").get_json()["feed_source"] == "orchestrator")
 
@@ -917,11 +951,11 @@ check("a pending countdown traces back too",
       all(item["transcript_url"] == f"/meetings/{item['meeting_id']}"
           for item in trace_state["pending"] if item["meeting_id"]))
 
-trace_markup = client.get("/").get_data(as_text=True)
+trace_markup = client.get("/d/github").get_data(as_text=True)
 check("the quote is rendered as the link, not a separate footnote",
       f'class="quote-text quote-trace" href="/meetings/{_FIXTURE_MEETING}"' in trace_markup)
 check("the fragment renders the same trace, so a poll cannot drop it",
-      "quote-trace" in client.get("/api/fragment").get_json()["cards_html"])
+      "quote-trace" in client.get("/api/fragment?domain=github").get_json()["cards_html"])
 check("board.css styles the trace so it does not read as a raw blue link",
       b".quote-trace" in client.get("/static/board.css").data)
 
@@ -934,7 +968,7 @@ board_server._TRANSCRIPT_PRESENT.pop(_FIXTURE_MEETING, None)
 board_server._TRANSCRIPT_MISSES[_FIXTURE_MEETING] = _time.monotonic()
 check("a meeting the library does not hold gets no link at all",
       board_server.card_transcript_url(_FIXTURE_MEETING) == "")
-no_trace_markup = client.get("/").get_data(as_text=True)
+no_trace_markup = client.get("/d/github").get_data(as_text=True)
 check("...and the quote falls back to plain text, not a 404 link",
       "quote-trace" not in no_trace_markup and "quote-text" in no_trace_markup)
 check("the words themselves are still on the card",
@@ -1098,7 +1132,7 @@ for path in ("/", "/ledger", "/connections"):
     check(f"{path} carries the claim",
           board_server.PRIVACY_LINE in client.get(path).get_data(as_text=True))
 check("the rail carries it beside the thinking",
-      board_server.PRIVACY_LINE in client.get("/api/fragment").get_json()["guts_html"])
+      board_server.PRIVACY_LINE in client.get("/api/fragment?domain=github").get_json()["guts_html"])
 for template in ("board.html", "meetings.html", "meeting.html",
                  "meeting_detail.html", "connections.html"):
     source = (board_server.config.PACKAGE_ROOT / "templates" / template).read_text(

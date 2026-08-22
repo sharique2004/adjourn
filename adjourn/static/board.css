@@ -6,37 +6,27 @@
  */
 
 :root {
-  --ink:            #0a0b0d;
-  --ink-raised:     #131519;
-  --ink-raised-2:   #171a1f;
-  --line:           rgba(255, 255, 255, 0.07);
-  --line-strong:    rgba(255, 255, 255, 0.14);
+  --ink:            #0b0b0c;
+  --ink-raised:     #131416;
+  --ink-raised-2:   #181a1d;
+  --line:           rgba(255, 255, 255, 0.08);
+  --line-strong:    rgba(255, 255, 255, 0.16);
 
-  --text:           #f2f4f7;
-  --text-dim:       #b3bac6;   /* 9.4:1 on the card — was #9aa1ad, 4.2:1 */
-  --text-dimmer:    #949ba7;   /* 6.6:1 on the card — was #6d7480, 3.9:1 */
+  --text:           #ecece8;
+  --text-dim:       #a8abb3;
+  --text-dimmer:    #8b8f98;
 
   --live:           #4ade80;
-  /* The SIM badge is the product: "I'd rather show you a badge that says 'sim'
-   * than a demo that quietly fakes the send" is the line, and in the recommended
-   * demo mode ten of eleven cards wear it. At #7c828d it was 3.86:1 — failing
-   * WCAG AA, 3.1x dimmer than the LIVE badge beside it, and the least legible
-   * thing on a board whose argument is that you can read what it did. ~10:1 now:
-   * as loud as LIVE, just not green. */
   --sim:            #b9c0cb;
   --fail:           #f0616d;
   --hold:           #e8b339;
 
-  --accent:         #8b93a7;  /* per-card override below */
+  --accent:         #8b93a7;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text",
                system-ui, "Segoe UI", sans-serif;
   --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
                 Georgia, serif;
-  /* JetBrains Mono when the machine has it, the system's own mono when it does
-   * not. NOT web-loaded on purpose: this app runs on a laptop with the wifi off
-   * as often as not, and a font that arrives over the network is a font that
-   * renders as a fallback in the one room where it matters. */
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
                Consolas, monospace;
 
@@ -90,7 +80,7 @@
 [data-kind="slack_send"]        { --accent: #2eb67d; }
 [data-kind="email_send"]        { --accent: #e8a33d; }
 [data-kind="calendar_hold"]     { --accent: #f2585b; }
-[data-kind="recap_page"]        { --accent: #d6c8a6; }
+[data-kind="recap_page"]        { --accent: #8b93a7; }
 
 * { box-sizing: border-box; }
 
@@ -107,7 +97,7 @@ body {
   padding: 0 clamp(14px, 2.4vw, 24px) 96px;
   overflow-x: clip;
   background:
-    radial-gradient(1200px 480px at 50% -180px, rgba(255, 255, 255, 0.045), transparent 70%),
+    radial-gradient(1200px 480px at 50% -180px, rgba(255, 255, 255, 0.035), transparent 70%),
     var(--ink);
   color: var(--text);
   font-family: var(--font-sans);
@@ -151,7 +141,7 @@ body > footer { width: 100%; }
   margin: 0 auto;
   max-width: min(var(--page), 100%);
   padding: 16px 0 10px;
-  background: linear-gradient(var(--ink) 72%, rgba(10, 11, 13, 0));
+  background: linear-gradient(var(--ink) 72%, rgba(11, 11, 12, 0));
 }
 
 .masthead-inner {
@@ -190,13 +180,20 @@ body > footer { width: 100%; }
 .totals { color: var(--text); font-variant-numeric: tabular-nums; }
 .mode-note { color: var(--text-dimmer); font-style: italic; }
 
-.tagline {
-  margin: 0 0 3px auto;
-  color: var(--text-dimmer);
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: 16px;
-  letter-spacing: 0.01em;
+.tagline,
+.mode-note,
+.totals {
+  display: none;
+}
+
+.meeting-meta > .meta-item {
+  display: none;
+}
+
+.meeting-meta > .meta-item:has(.badge),
+.meeting-meta > .meta-item:has(.chip) {
+  display: flex;
+  align-items: center;
 }
 
 /* --- view switch --------------------------------------------------------- */
@@ -250,25 +247,26 @@ body > footer { width: 100%; }
   display: inline-flex;
   align-items: center;
   min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
   color: var(--text-dimmer);
   font-size: 13.5px;
   font-weight: 550;
   letter-spacing: 0.015em;
   text-decoration: none;
+  box-shadow: inset 0 -1px 0 transparent;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .viewlink:hover { color: var(--text-dim); background: rgba(255, 255, 255, 0.035); }
-  .viewlink.is-current:hover { background: var(--ink-raised-2); }
+  .viewlink:hover { color: var(--text-dim); background: transparent; }
+  .viewlink.is-current:hover { background: transparent; }
 }
 
 .viewlink.is-current {
-  border-color: var(--line-strong);
-  background: var(--ink-raised-2);
   color: var(--text);
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--text);
 }
 
 .viewlink:focus-visible {
@@ -333,12 +331,13 @@ body > footer { width: 100%; }
 }
 
 .column-count {
-  padding: 1px 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dimmer);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -394,6 +393,10 @@ body > footer { width: 100%; }
   color: var(--text-dimmer);
   font-size: 13px;
   letter-spacing: 0.01em;
+}
+
+.meeting-block-meta > span:not(.meeting-block-when) {
+  display: none;
 }
 
 .meeting-block-when {
@@ -454,78 +457,58 @@ body > footer { width: 100%; }
 }
 
 .chip {
-  padding: 3px 9px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  /* The label is the accent carried 20% toward white. The border and the fill
-   * keep the true accent, so the kind still reads by colour at a glance; the
-   * text clears AA, which the raw accent did not — Linear's #5e6ad2 measured
-   * 3.4:1 on its own chip. Worst case after the mix is 4.9:1. */
-  color: color-mix(in srgb, var(--accent) 80%, #ffffff);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accent) 72%, #ffffff);
   font-size: 11.5px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-weight: 560;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.chip-small { font-size: 10.5px; padding: 2px 7px; }
+.chip-small { font-size: 10.5px; padding: 0; }
 
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  /* 11px subtended ~3.8 arcmin from 1.5m on this laptop; the legibility floor is
-   * ~8-10. Still small, but the mode badge is now the size of a thing meant to
-   * be read rather than a thing meant to be inferred. */
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0.08em;
 }
 
 .badge-live {
-  background: color-mix(in srgb, var(--live) 16%, transparent);
   color: var(--live);
-  border: 1px solid color-mix(in srgb, var(--live) 40%, transparent);
 }
 
 .badge-live .dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--live);
 }
 
 .badge-sim {
-  background: rgba(255, 255, 255, 0.05);
   color: var(--sim);
-  border: 1px solid var(--line-strong);
 }
 
 .badge-failed {
-  background: color-mix(in srgb, var(--fail) 15%, transparent);
   color: var(--fail);
-  border: 1px solid color-mix(in srgb, var(--fail) 40%, transparent);
 }
 
-/* THE ONE THING ON AN UNDONE CARD THAT MUST STILL READ. The card is dimmed to
- * 0.55 on purpose, and every colour inside it is dimmed with it — which put the
- * badge that says UNDONE at 2.7:1, the least legible thing on the card whose
- * entire job is to announce a state. Full-strength ink and a heavier fill carry
- * it through the dim at 4.8:1. */
 .badge-undone {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text);
-  border: 1px solid var(--line-strong);
+  color: var(--text-dim);
 }
 
 .badge-holding {
-  background: color-mix(in srgb, var(--hold) 15%, transparent);
   color: var(--hold);
-  border: 1px solid color-mix(in srgb, var(--hold) 38%, transparent);
 }
 
 .stamp, .elapsed {
@@ -649,7 +632,7 @@ body > footer { width: 100%; }
 .undo {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
+  min-height: 44px;
   padding: 0 14px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -677,7 +660,7 @@ body > footer { width: 100%; }
 /* Cancel, on a countdown, is the one of these two anyone actually presses — a
  * 60s window exists to be usable. Same family, one step less quiet. */
 .undo-cancel {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 18px;
   border-color: color-mix(in srgb, var(--hold) 40%, transparent);
   color: var(--hold);
@@ -749,7 +732,7 @@ body > footer { width: 100%; }
 }
 
 .send-now {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 18px;
   border: 1px solid var(--text);
   border-radius: 8px;
@@ -936,7 +919,34 @@ body > footer { width: 100%; }
   font-variant-numeric: tabular-nums;
 }
 
-.kind-tally { display: flex; gap: 6px; flex-wrap: wrap; }
+.card-top .chip,
+.commitment-meta .chip,
+.mrow .stamp,
+body[data-view="library"] .masthead .badge,
+.rail-stage-badges,
+.ledger-lede,
+.kind-tally,
+.avatar,
+.card-bottom .elapsed,
+.card-bottom .external-id,
+.commitment-meta .external-id,
+.domain-copy,
+.domain-lede,
+.rail-privacy,
+.preflight-needs,
+.preflight-kind,
+.person-meta,
+.empty-pulse {
+  display: none;
+}
+
+.quote,
+.commitment .quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
 
 /* A COUNT, NOT A BUTTON. These sat in the kind's accent inside an accent-tinted
  * border, which at the top-right of every person made a row of small coloured
@@ -1027,15 +1037,11 @@ body > footer { width: 100%; }
 
 .preflight-row {
   display: grid;
-  /* The last column is 140 because `pr_review_suggestion` measures 138 at
-   * 11.5px mono; at 132 it was clipped without an ellipsis at 1280 wide. */
-  grid-template-columns: 118px 74px minmax(0, 1fr) minmax(0, auto) 140px;
+  grid-template-columns: 118px 74px minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   padding: 11px 16px;
   border-bottom: 1px solid var(--line);
-  /* The kind's accent, on the left edge, the same 3px the ledger uses. Colour
-   * is how a reader finds GitHub among nine rows without reading nine labels. */
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
@@ -1053,22 +1059,9 @@ body > footer { width: 100%; }
   letter-spacing: -0.005em;
 }
 
-.preflight-needs {
-  min-width: 0;
-  color: var(--text-dimmer);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
+.preflight-needs,
 .preflight-kind {
-  color: var(--text-dimmer);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  text-align: right;
-  /* No opacity here: at 0.8 the slug on the SIM row measured 4.49:1, which is
-   * a fail by a hundredth on the one row a reader most wants to check. */
+  display: none;
 }
 
 /* Presence, six at a time. Auto-fit rather than a fixed count so the block is
@@ -1219,7 +1212,14 @@ body > footer { width: 100%; }
  * the executor artifacts — because a claim that is worded differently in five
  * places is five claims, and the audience only has to catch one of them being
  * wrong. */
-.footfall-privacy { color: var(--text-dimmer); }
+.footfall > .dot-sep,
+.footfall > span:not(.footfall-privacy):not(:first-child) {
+  display: none;
+}
+
+.footfall-privacy {
+  margin-left: auto;
+}
 
 /* The same weight as the literal "·" inside the footer's own phrases. At
  * --line-strong (a hairline token, 1.4:1) these two read as missing, so one
@@ -1464,23 +1464,17 @@ body > footer { width: 100%; }
 }
 
 .rail-live-count {
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dimmer);
+  font-size: 11px;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .rail-live-source {
-  color: var(--text-dimmer);
-  font-family: var(--font-mono);
-  /* 9.5px at 0.75 opacity measured 4.2:1 — under AA, and small enough that the
-   * word was a smudge rather than a fact. */
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: lowercase;
+  display: none;
 }
 
 .rail-feed {
@@ -1513,14 +1507,14 @@ body > footer { width: 100%; }
  * beside a sentence reads as a labelled row. */
 .rail-chip {
   flex: 0 0 auto;
-  align-self: center;
+  align-self: baseline;
   max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.045);
+  padding: 0;
+  border-radius: 0;
+  background: none;
   color: var(--text-dimmer);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1544,13 +1538,13 @@ body > footer { width: 100%; }
 .rail-row[data-tone="act"] { border-left-color: color-mix(in srgb, var(--live) 60%, transparent); }
 .rail-row[data-tone="act"] .rail-chip {
   color: var(--live);
-  background: color-mix(in srgb, var(--live) 13%, transparent);
+  background: none;
 }
 
 .rail-row[data-tone="hold"] { border-left-color: color-mix(in srgb, var(--hold) 60%, transparent); }
 .rail-row[data-tone="hold"] .rail-chip {
   color: var(--hold);
-  background: color-mix(in srgb, var(--hold) 13%, transparent);
+  background: none;
 }
 
 .rail-row[data-tone="ignore"] { border-left-color: var(--line-strong); }
@@ -1568,7 +1562,7 @@ body > footer { width: 100%; }
 .rail-row[data-tone="decline"] { border-left-color: color-mix(in srgb, var(--fail) 60%, transparent); }
 .rail-row[data-tone="decline"] .rail-chip {
   color: var(--fail);
-  background: color-mix(in srgb, var(--fail) 13%, transparent);
+  background: none;
 }
 
 .rail-row[data-stage="extraction"] .rail-text { color: var(--text); }
@@ -1914,3 +1908,123 @@ body > footer { width: 100%; }
   .headline { font-size: 20px; }  /* the floor the file's own header promises */
   .pending-row { flex-wrap: wrap; }
 }
+
+.domain-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 8px 0 32px;
+}
+
+.domain-tile {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--ink-raised);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+
+.domain-tile h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.domain-status {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+.domain-tile:not(.has-work) .domain-status {
+  color: var(--text-dimmer);
+}
+
+.domain-copy {
+  margin: auto 0 0;
+  padding-top: 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .domain-tile:hover {
+    border-color: var(--line-strong);
+    background: var(--ink-raised-2);
+  }
+}
+
+.domain-tile:focus-visible {
+  outline: 2px solid var(--text-dim);
+  outline-offset: 3px;
+}
+
+.domain-lede {
+  margin: 0 0 8px;
+  max-width: 52ch;
+  font-size: 16px;
+  color: var(--text-dim);
+}
+
+.domain-back {
+  margin: 0 0 22px;
+  font-size: 13px;
+}
+
+.domain-back a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.domain-back a:hover { text-decoration: underline; }
+
+.work-spec {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-spec li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.work-spec span {
+  display: none;
+}
+
+.work-spec b {
+  font-weight: 560;
+  color: var(--text);
+}
+
+.work-spec code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.meeting-recap {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.meeting-recap:hover { text-decoration: underline; }

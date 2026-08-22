@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 /** The palette is forced dark; tell the browser so form controls match. */
 export const viewport: Viewport = {
-  themeColor: '#08090a',
+  themeColor: '#0b0b0c',
   colorScheme: 'dark',
 };
 

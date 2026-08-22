@@ -8,7 +8,7 @@
   Every macro comes from board.html: one card shape, one set of badges, one undo
   affordance across the whole app.
 #}
-{% from "board.html" import action_card, pending_column, shell_tabbar with context %}
+{% from "board.html" import action_card, pending_column, shell_tabbar, domain_grid with context %}
 <!doctype html>
 <html lang="en" data-view="meeting">
 <head>
@@ -49,13 +49,8 @@
     <a class="link" href="/">All meetings' actions</a>
   </nav>
 
-  {{ pending_column(meeting.pending) }}
-
-  {% if meeting.cards %}
-  <section class="column column-done" aria-label="Actions Adjourn executed for this meeting">
-    <h2 class="column-title">Executed <span class="column-count">{{ meeting.cards | length }}</span></h2>
-    {% for card in meeting.cards %}{{ action_card(card) }}{% endfor %}
-  </section>
+  {% if meeting.cards or meeting.pending %}
+  {{ domain_grid(meeting.domains) }}
   {% else %}
   {# A MEETING THAT CAUSED NOTHING IS A RESULT, AND IT IS ALSO A DEAD END if the
      only way onward is a small link three inches above. Whoever arrives here

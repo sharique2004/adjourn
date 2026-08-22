@@ -74,7 +74,7 @@ from flask import (
     request,
 )
 
-from . import config, orchestrator, planner, results
+from . import config, orchestrator, planner, results, work_brief
 
 # --- port -------------------------------------------------------------------
 #
@@ -127,6 +127,47 @@ LINK_LABELS: dict[str, str] = {
 
 QUIET_HEADER_LINE = "The meeting is the to-do."
 EMPTY_STATE_LINE = "Adjourned. Waiting for the next meeting."
+
+# The four workbenches Follow-through is for. Calendar and recap still fire;
+# they are not first-class here.
+DOMAINS: tuple[dict, ...] = (
+    {
+        "slug": "linear",
+        "title": "Linear",
+        "lede": "Tickets the room filed or moved. Recall archives them; Send again files them fresh.",
+        "kinds": ("linear_create", "linear_move"),
+        "empty": "No Linear work from this sitting.",
+    },
+    {
+        "slug": "slack",
+        "title": "Slack",
+        "lede": "Messages wait here. Edit the draft, then Send — or don't.",
+        "kinds": ("slack_send",),
+        "empty": "No Slack drafts from this sitting.",
+    },
+    {
+        "slug": "github",
+        "title": "GitHub",
+        "lede": "Comments, draft PRs, review notes. Recall deletes them; Send again posts them again.",
+        "kinds": ("github_update", "pull_request_stub", "pr_review_suggestion"),
+        "empty": "No GitHub work from this sitting.",
+    },
+    {
+        "slug": "email",
+        "title": "Email",
+        "lede": "Mail waits here. Edit the draft, then Send — or don't.",
+        "kinds": ("email_send",),
+        "empty": "No email drafts from this sitting.",
+    },
+)
+
+DOMAIN_BY_SLUG = {item["slug"]: item for item in DOMAINS}
+KIND_TO_DOMAIN = {
+    kind: item["slug"]
+    for item in DOMAINS
+    for kind in item["kinds"]
+}
+RECALLABLE_KINDS = orchestrator.RECALLABLE_KINDS
 
 # TRACING A QUOTE BACK TO WHAT WAS SAID. Every card carries the words that caused
 # it; the demo beat is that those words are not decoration — you click them and
@@ -420,6 +461,8 @@ def describe_undo_affordance(card: dict) -> tuple[bool, str]:
         return False, "undone"
     if card["kind"] == "email_send" and card["mode"] == results.MODE_LIVE:
         return False, "sent · cannot be unsent"
+    if card["kind"] in RECALLABLE_KINDS:
+        return True, ""
     if not card["has_undo_payload"]:
         return False, "no undo handle"
     return True, ""
@@ -451,9 +494,19 @@ def build_card(record: dict, index: int, undone_keys: set[str], now: datetime) -
         "undone": bool(dedup_key and dedup_key in undone_keys),
         "has_undo_payload": bool(record.get("undo_payload")),
     }
+    brief = work_brief.from_record(record)
+    card["files"] = brief["files"]
+    card["branch"] = brief["branch"]
+    card["work_status"] = brief["work_status"]
     card["can_undo"], card["undo_note"] = describe_undo_affordance(card)
     card["undo_label"] = choose_undo_label(card)
     card["undo_title"] = describe_undo_label(card)
+    card["can_resend"] = bool(
+        card["undone"]
+        and card["kind"] in RECALLABLE_KINDS
+        and isinstance(record.get("action_payload"), dict)
+        and record.get("action_payload")
+    )
     card["state"] = "failed" if not card["ok"] else ("undone" if card["undone"] else "ok")
     card["carries_conflict"] = record_carries_conflict(record)
     card["pinned"] = card_shows_a_transition(card)
@@ -500,6 +553,10 @@ def build_cancellation_card(record: dict, index: int, now: datetime) -> dict:
         "pinned": False,
         "state": "cancelled",
         "transcript_url": card_transcript_url(record.get("meeting_id") or ""),
+        "files": [],
+        "branch": "",
+        "work_status": "",
+        "can_resend": False,
     }
 
 
@@ -524,18 +581,24 @@ def choose_undo_label(card: dict) -> str:
     simulated, the button says the local file is not.
     """
     if card["mode"] != results.MODE_SIM:
-        return "Undo"
+        return "Recall" if card["kind"] in RECALLABLE_KINDS else "Undo"
     if card["kind"] in LOCALLY_REAL_IN_SIM_KINDS:
         return "Undo (local)"
+    if card["kind"] in RECALLABLE_KINDS:
+        return "Recall (sim)"
     return "Undo (sim)"
 
 
 def describe_undo_label(card: dict) -> str:
     """The tooltip under the button's word. Says which of the three cases this is."""
     if card["mode"] != results.MODE_SIM:
+        if card["kind"] in RECALLABLE_KINDS:
+            return "removes it from Linear or GitHub. Send again puts it back."
         return "reverses the real thing this action did"
     if card["kind"] in LOCALLY_REAL_IN_SIM_KINDS:
         return "the transport was simulated, but the local file is real — this removes it"
+    if card["kind"] in RECALLABLE_KINDS:
+        return "nothing was sent; this only clears the card"
     return "nothing was sent; this only clears the card"
 
 
@@ -949,6 +1012,64 @@ def build_meeting_groups(cards: list[dict], pending: list[dict]) -> list[dict]:
     return groups
 
 
+def build_domain_summaries(cards: list[dict], pending: list[dict]) -> list[dict]:
+    """The four Follow-through tiles: counts a person can act on."""
+    tiles = []
+    for spec in DOMAINS:
+        kinds = spec["kinds"]
+        live_cards = [
+            card for card in cards
+            if card.get("kind") in kinds and card.get("state") not in {"cancelled"}
+        ]
+        live = sum(1 for card in live_cards if not card.get("undone"))
+        recalled = sum(1 for card in live_cards if card.get("undone"))
+        drafts = sum(1 for item in pending if item.get("kind") in kinds)
+        if drafts:
+            status = f"{drafts} to send" + (f" · {live} live" if live else "")
+        elif recalled and not live:
+            status = f"{recalled} recalled"
+        elif recalled:
+            status = f"{live} live · {recalled} recalled"
+        elif live:
+            status = f"{live} live"
+        else:
+            status = "Nothing yet"
+        tiles.append({
+            **spec,
+            "href": f"/d/{spec['slug']}",
+            "live": live,
+            "recalled": recalled,
+            "drafts": drafts,
+            "status": status,
+            "has_work": bool(live or recalled or drafts),
+        })
+    return tiles
+
+
+def filter_groups_to_domain(groups: list[dict], slug: str) -> list[dict]:
+    """Keep only one domain's drafts and cards, still grouped by meeting."""
+    spec = DOMAIN_BY_SLUG.get(slug)
+    if spec is None:
+        return []
+    kinds = set(spec["kinds"])
+    filtered = []
+    for group in groups:
+        cards = [card for card in (group.get("cards") or []) if card.get("kind") in kinds]
+        pending = [item for item in (group.get("pending") or []) if item.get("kind") in kinds]
+        if not cards and not pending:
+            continue
+        filtered.append({
+            **group,
+            "cards": cards,
+            "pending": pending,
+            "executed_count": sum(
+                1 for card in cards if card.get("state") != "cancelled"
+            ),
+            "pending_count": len(pending),
+        })
+    return filtered
+
+
 def executors_pipeline_view(totals: dict, pending_count: int) -> dict:
     """Countdown / live / sim / cancelled, composed from files the board already reads."""
     live = int(totals.get("live") or 0)
@@ -1356,6 +1477,7 @@ def load_board_state(now: datetime | None = None) -> dict:
     # NEVER-BLANK OPEN. Only computed when there is nothing else to show, so a
     # board with cards on it never pays for the memory read.
     last_adjourned = load_last_adjourned(now) if not cards and not pending else None
+    domains = build_domain_summaries(cards, pending)
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         "meeting": header,
@@ -1364,10 +1486,23 @@ def load_board_state(now: datetime | None = None) -> dict:
         "cards": cards,
         "pending": pending,
         "meeting_groups": meeting_groups,
+        "domains": domains,
+        "domain": None,
         "mode_note": describe_mode_note(totals, last_adjourned),
         "pipeline": pipeline,
         "last_adjourned": last_adjourned,
     }
+
+
+def load_domain_state(slug: str, now: datetime | None = None) -> dict | None:
+    """Follow-through for one of the four workbenches, or None if the slug is unknown."""
+    spec = DOMAIN_BY_SLUG.get(slug)
+    if spec is None:
+        return None
+    state = load_board_state(now)
+    state["domain"] = spec
+    state["meeting_groups"] = filter_groups_to_domain(state["meeting_groups"], slug)
+    return state
 
 
 # --- never-blank open --------------------------------------------------------
@@ -1867,6 +2002,9 @@ def load_meeting_view(meeting_id: str, now: datetime | None = None) -> dict:
     totals["pending"] = len(pending)
     header = read_meeting_header(meeting_id)
     recap = next((card for card in cards if card["kind"] == "recap_page"), None)
+    domains = build_domain_summaries(cards, pending)
+    for tile in domains:
+        tile["href"] = f"/d/{tile['slug']}#m-{meeting_id}" if meeting_id else tile["href"]
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         # Same rule as Connections: the footer says a time, not an ISO string.
@@ -1874,6 +2012,7 @@ def load_meeting_view(meeting_id: str, now: datetime | None = None) -> dict:
         "meeting": header,
         "cards": cards,
         "pending": pending,
+        "domains": domains,
         "totals": totals,
         "totals_line": build_totals_line(totals),
         "recap_url": recap["url"] if recap else "",
@@ -2191,6 +2330,23 @@ def perform_send(card_id: str, edits: dict | None = None) -> dict:
     return {"ok": False, "action": "failed", "message": result.human_summary}
 
 
+def perform_resend(card_id: str) -> dict:
+    """Send a recalled Linear or GitHub action again."""
+    card_id = (card_id or "").strip()
+    if not card_id:
+        return {"ok": False, "action": "refused", "message": "no card id"}
+    result = orchestrator.resend_execution(card_id, journal_path=journal_path())
+    if result is None:
+        return {
+            "ok": False,
+            "action": "refused",
+            "message": "recall it first, then send again",
+        }
+    if result.ok:
+        return {"ok": True, "action": "sent", "message": result.human_summary}
+    return {"ok": False, "action": "failed", "message": result.human_summary}
+
+
 def unwind_remaining_generations(record: dict, dedup_key: str, note: str) -> tuple[bool, str]:
     """Undo the older writes of an artifact that rewrites itself in place.
 
@@ -2464,6 +2620,19 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
             ledger=None,
         )
 
+    @app.get("/d/<slug>")
+    def render_domain(slug: str):
+        state = load_domain_state(slug)
+        if state is None:
+            abort(404)
+        return render_page(
+            "board.html",
+            "board",
+            state=state,
+            version=compute_version(state),
+            ledger=None,
+        )
+
     @app.get("/ledger")
     def render_ledger():
         state = load_board_state()
@@ -2517,24 +2686,32 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
     @app.get("/api/fragment")
     def serve_fragment():
         """The 1s poll. Returns pre-rendered HTML from the page's own macros."""
-        state = load_board_state()
+        slug = (request.args.get("domain") or "").strip()
+        state = load_domain_state(slug) if slug else load_board_state()
+        if state is None:
+            abort(404)
         version = compute_version(state)
         if request.args.get("version") == version:
             return jsonify({"version": version, "unchanged": True})
 
         render_header = get_template_attribute("board.html", "board_header")
         render_followthrough = get_template_attribute("board.html", "followthrough_column")
+        render_grid = get_template_attribute("board.html", "domain_grid")
         render_guts = get_template_attribute("board.html", "guts_panel")
+        domain = state.get("domain")
+        cards_html = (
+            render_followthrough(state.get("meeting_groups") or [], None, domain)
+            if domain
+            else render_grid(state.get("domains") or [], state.get("last_adjourned"))
+        )
         return jsonify(
             {
                 "version": version,
                 "unchanged": False,
                 "header_html": render_header(state),
                 "pending_html": "",
-                "cards_html": render_followthrough(
-                    state.get("meeting_groups") or [], state.get("last_adjourned")
-                ),
-                "guts_html": render_guts(state.get("pipeline") or {}),
+                "cards_html": cards_html,
+                "guts_html": render_guts(state.get("pipeline") or {}) if domain else "",
                 "totals_line": state["totals_line"],
                 "card_count": len(state["cards"]),
                 "pending_count": len(state["pending"]),
@@ -2587,6 +2764,14 @@ def create_board_application(*, undo_token: str | None = None) -> Flask:
             "subject": payload.get("subject"),
         }
         outcome = perform_send(card_id, edits)
+        return jsonify(outcome), (200 if outcome["ok"] else 409)
+
+    @app.post("/resend/<path:card_id>")
+    def resend_card(card_id: str):
+        authorized, refusal = undo_request_is_authorized(app)
+        if not authorized:
+            return jsonify({"ok": False, "action": "refused", "message": refusal}), 403
+        outcome = perform_resend(card_id)
         return jsonify(outcome), (200 if outcome["ok"] else 409)
 
     @app.get("/healthz")

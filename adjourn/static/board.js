@@ -19,9 +19,10 @@
 
   var body = document.body;
   var view = body.dataset.view || "board";
+  var domain = body.dataset.domain || "";
   /* Only the board polls. The ledger, the connections page and one meeting's
    * page are read-once documents; polling them would churn HTML nobody is
-   * watching change. */
+   * watching change. Domain pages are the board. */
   var pollsForFragments = view === "board";
 
   /* This run's undo token, minted by the server at start and printed into the
@@ -250,7 +251,8 @@
     if (!pollsForFragments) {
       return Promise.resolve();
     }
-    return fetch("/api/fragment?version=" + encodeURIComponent(currentVersion), {
+    return fetch("/api/fragment?version=" + encodeURIComponent(currentVersion) +
+      (domain ? "&domain=" + encodeURIComponent(domain) : ""), {
       headers: { Accept: "application/json" },
       cache: "no-store"
     })
@@ -357,11 +359,50 @@
       });
   }
 
+  function sendAgain(cardId, button) {
+    button.disabled = true;
+    button.textContent = "…";
+    var headers = { Accept: "application/json" };
+    if (undoToken) {
+      headers["X-Adjourn-Undo-Token"] = undoToken;
+    }
+    fetch("/resend/" + encodeURIComponent(cardId), {
+      method: "POST",
+      headers: headers,
+      cache: "no-store"
+    })
+      .then(function (response) {
+        return response.json().catch(function () {
+          return { ok: false, message: "the board could not read the response" };
+        });
+      })
+      .then(function (outcome) {
+        showToast(outcome.message || (outcome.ok ? "sent again" : "refused"), outcome.ok ? "good" : "bad");
+        currentVersion = "";
+        if (!pollsForFragments) {
+          window.setTimeout(function () { window.location.reload(); }, 900);
+          return Promise.resolve();
+        }
+        return pollOnce();
+      })
+      .catch(function () {
+        showToast("send again could not reach the board", "bad");
+        button.disabled = false;
+        button.textContent = button.dataset.sendLabel || "Send again";
+      });
+  }
+
   document.addEventListener("click", function (event) {
     var sendButton = event.target.closest ? event.target.closest("[data-send]") : null;
     if (sendButton) {
       event.preventDefault();
       sendNow(sendButton.dataset.send, sendButton);
+      return;
+    }
+    var resendButton = event.target.closest ? event.target.closest("[data-resend]") : null;
+    if (resendButton) {
+      event.preventDefault();
+      sendAgain(resendButton.dataset.resend, resendButton);
       return;
     }
     var button = event.target.closest ? event.target.closest("[data-undo]") : null;

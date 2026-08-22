@@ -143,6 +143,11 @@ def build_comment_markdown(action: Action) -> str:
             "</details>",
             "",
         ]
+    from .. import work_brief
+
+    brief = work_brief.as_markdown(payload)
+    if brief:
+        lines += [brief]
     lines += [
         "---",
         "",

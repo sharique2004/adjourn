@@ -188,22 +188,29 @@ with tempfile.TemporaryDirectory() as temporary:
     results.append_undo(fired, True, "github_update:4:cache-layer", path=journal)
     check("undone key tracked",
           results.read_undone_dedup_keys(path=journal) == {"github_update:4:cache-layer"})
+    results.append_execution(
+        fired, "github_update:4:cache-layer",
+        extra={"action_payload": {"issue_number": 4}},
+        path=journal,
+    )
+    check("a later execution of the same key clears the strike-through",
+          results.read_undone_dedup_keys(path=journal) == set())
 
     totals = results.summarize_executions(path=journal)
-    check("totals: 3 fired", totals["fired"] == 3, str(totals))
-    check("totals: 1 live / 2 sim", totals["live"] == 1 and totals["sim"] == 2, str(totals))
+    check("totals: 4 fired", totals["fired"] == 4, str(totals))
+    check("totals: 2 live / 2 sim", totals["live"] == 2 and totals["sim"] == 2, str(totals))
     check("a failure that never sent is badged sim, not live", broken.mode == "sim", broken.mode)
     check("totals: 1 failed", totals["failed"] == 1, str(totals))
     check("totals: 1 undone", totals["undone"] == 1, str(totals))
 
     batch_one, offset = results.read_records_since(0, path=journal)
-    check("tail-f reads all then nothing new", len(batch_one) == 4)
+    check("tail-f reads all then nothing new", len(batch_one) == 5)
     batch_two, offset_two = results.read_records_since(offset, path=journal)
     check("tail-f second pass is empty", batch_two == [] and offset_two == offset)
 
     journal.write_text(journal.read_text() + "{ this is not json\n")
     check("malformed line is skipped, not raised",
-          len(results.read_executions(path=journal)) == 4)
+          len(results.read_executions(path=journal)) == 5)
 
     filtered = results.read_executions(meeting_id="nope", path=journal)
     check("meeting filter works", filtered == [])
